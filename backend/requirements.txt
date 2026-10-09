@@ -2,9 +2,17 @@ fastapi==0.115.0
 uvicorn==0.31.0
 google-genai==1.0.0
 pydantic==2.12.5
+pydantic-settings==2.15.0
 python-multipart==0.0.12
 python-dotenv==1.0.1
 pillow==11.3.0
-sqlalchemy==2.0.44
 scikit-learn==1.9.1
 numpy==2.5.3
+httpx==0.28.1
+PyJWT==2.15.1
+email-validator==2.3.0
+
+# tests / lint
+pytest==9.1.1
+ruff==0.16.10
+schemathesis==4.30.0

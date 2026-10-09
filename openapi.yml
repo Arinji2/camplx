@@ -1,0 +1,2193 @@
+openapi: 3.1.0
+info:
+  title: Camplx Campus Circular Marketplace API
+  version: 1.0.0
+  description: >
+    Canonical backend contract for CAMPLX (CampusSwap AI). Facilitates peer-to-peer campus reuse,
+    multi-angle computer vision product inspection, evidence-backed appraisal pricing,
+    no-payment reservations, campus want-board ("Need It"), e-waste collection optimization,
+    and verified sustainability metrics.
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local FastAPI Development Server (iOS Simulator / Web)
+  - url: http://10.0.2.2:8000/api/v1
+    description: Android Emulator Gateway
+  - url: https://api.camplx.internal/api/v1
+    description: Staging / Production Backend Gateway
+tags:
+  - name: System
+    description: Health, diagnostics, and environment configuration.
+  - name: Auth & Identity
+    description: User identity, profile management, and demo session bootstrapping.
+  - name: Listings
+    description: Campus marketplace item creation, discovery, filtering, and lifecycle.
+  - name: Inspection & Appraisal
+    description: Multi-angle visual capture, AI defect detection, and evidence-backed pricing.
+  - name: Reservations
+    description: No-payment hold and offline pickup agreements between students.
+  - name: Need It Requests
+    description: Reverse-marketplace demand board and automated catalog matching.
+  - name: Wishlist
+    description: Saved items and cross-device bookmarking.
+  - name: E-Waste Optimization
+    description: Campus electronic waste collection, K-Means clustering, and TSP route optimization.
+  - name: Sustainability & Leaderboard
+    description: Verified reuse metrics, landfill diversion telemetry, and peer rankings.
+  - name: Messaging & Notifications
+    description: Direct student coordination and in-app event feeds.
+
+paths:
+  /system/health:
+    get:
+      tags: [System]
+      operationId: getSystemHealth
+      summary: Health check and downstream persistence verification
+      description: Returns health status of FastAPI, database connectivity (PocketBase/SQLite), and Gemini service availability.
+      responses:
+        "200":
+          description: System operational
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatusResponse"
+        "503":
+          description: Service unavailable or persistence disconnected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/demo-session:
+    post:
+      tags: [Auth & Identity]
+      operationId: createDemoSession
+      summary: Issue or switch lightweight demo identity (Development Only)
+      description: >
+        Bootstraps an authenticated session for hackathon demo evaluation without third-party email OTP gate latency.
+        Strictly restricted to development and demo environments (disabled in production).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DemoSessionRequest"
+      responses:
+        "200":
+          description: Identity bootstrapped successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+        "400":
+          description: Invalid demo request payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Demo session bootstrap is disabled in production
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/me:
+    get:
+      tags: [Auth & Identity]
+      operationId: getCurrentUserProfile
+      summary: Retrieve current authenticated student profile
+      description: Returns private profile details, email, verified campus affiliation, points, and cumulative carbon savings.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "200":
+          description: Profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      tags: [Auth & Identity]
+      operationId: updateCurrentUserProfile
+      summary: Update profile attributes
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserProfileUpdateRequest"
+      responses:
+        "200":
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /listings:
+    get:
+      tags: [Listings]
+      operationId: listMarketplaceListings
+      summary: Browse and search campus listings
+      description: Returns paginated active marketplace listings filtered by campus, category, keyword, and condition.
+      parameters:
+        - name: campus_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: category
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ItemCategoryEnum"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ListingStatusEnum"
+          description: Defaults to 'active' if unspecified.
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: listing_type
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ListingTypeEnum"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        "200":
+          description: Paginated listings list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedListingsResponse"
+        "400":
+          description: Bad filter parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags: [Listings]
+      operationId: createMarketplaceListing
+      summary: Publish a new listing
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateListingRequest"
+      responses:
+        "201":
+          description: Listing created and published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListingDetailResponse"
+        "400":
+          description: Invalid listing payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /listings/{listing_id}:
+    parameters:
+      - name: listing_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Listings]
+      operationId: getListingDetail
+      summary: Retrieve complete details for a listing
+      description: Returns listing attributes, images, linked AI inspection findings, and active reservation state.
+      responses:
+        "200":
+          description: Listing details retrieved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListingDetailResponse"
+        "404":
+          description: Listing not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      tags: [Listings]
+      operationId: updateMarketplaceListing
+      summary: Edit own listing attributes (Restricted Status Modification)
+      description: >
+        Allows updating title, description, asking price, and toggling between active and inactive.
+        Listing edits strictly cannot transition items to 'reserved', 'sold', or 'donated';
+        those transitions are exclusively driven by atomic reservation and completion workflows.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateListingRequest"
+      responses:
+        "200":
+          description: Listing updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListingDetailResponse"
+        "400":
+          description: Invalid update or attempt to bypass reservation workflow
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden (Not the listing owner)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Listing not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags: [Listings]
+      operationId: deleteMarketplaceListing
+      summary: Remove a listing
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "204":
+          description: Listing deleted
+        "403":
+          description: Forbidden (Not the listing owner)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Listing not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /sellers/{seller_id}/listings:
+    parameters:
+      - name: seller_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Listings]
+      operationId: getSellerPublicProfileAndListings
+      summary: Retrieve public seller profile and active inventory
+      description: Returns public-safe seller details (excluding private institutional email) and their active inventory.
+      responses:
+        "200":
+          description: Seller public profile and active inventory retrieved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerProfileWithListingsResponse"
+        "404":
+          description: Seller not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inspections:
+    post:
+      tags: [Inspection & Appraisal]
+      operationId: createInspectionSession
+      summary: Initialize an inspection session
+      description: Creates an inspection session container before uploading multi-angle photographs.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInspectionSessionRequest"
+      responses:
+        "201":
+          description: Inspection session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectionSessionResponse"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inspections/{inspection_id}:
+    parameters:
+      - name: inspection_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Inspection & Appraisal]
+      operationId: getInspectionDetail
+      summary: Retrieve an existing inspection session
+      description: >
+        Retrieves complete inspection details, including uploaded multi-angle images, analysis findings,
+        defect annotations per image, pricing appraisal, and report version.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "200":
+          description: Inspection session and report retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectionRecordResponse"
+        "404":
+          description: Inspection session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inspections/{inspection_id}/images:
+    parameters:
+      - name: inspection_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Inspection & Appraisal]
+      operationId: uploadInspectionImage
+      summary: Upload an original image asset for an inspection session
+      description: Uploads an individual photo (front, back, wear close-up, tag). Preserves original file untouched.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - image
+                - display_order
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: JPEG or PNG binary image (max 15MB).
+                display_order:
+                  type: integer
+                  minimum: 0
+                  description: Ordered position in the sequence.
+                angle_label:
+                  type: string
+                  enum:
+                    [
+                      front,
+                      back,
+                      left,
+                      right,
+                      top,
+                      bottom,
+                      defect_close_up,
+                      label_or_serial,
+                      other,
+                    ]
+      responses:
+        "201":
+          description: Image uploaded and registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectionImageRecord"
+        "400":
+          description: Invalid image binary or parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inspections/{inspection_id}/analyze:
+    parameters:
+      - name: inspection_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Inspection & Appraisal]
+      operationId: runInspectionAnalysis
+      summary: Trigger multimodal AI inspection across uploaded images
+      description: >
+        Invokes Gemini 2.5 Flash on all registered inspection images. Produces structured product identity,
+        condition assessment, normalized defect bounding boxes [ymin, xmin, ymax, xmax] linked directly
+        to each source image, and generates per-image annotated derivative assets.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "200":
+          description: Inspection completed and findings synthesized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectionAnalysisResultResponse"
+        "400":
+          description: Inspection session contains zero images
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Gemini provider error or model timeout
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inspections/{inspection_id}/pricing:
+    parameters:
+      - name: inspection_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Inspection & Appraisal]
+      operationId: calculatePricingAppraisal
+      summary: Generate evidence-backed pricing recommendations
+      description: >
+        Calculates suggested used price boundaries by evaluating condition penalties against verified
+        catalog baselines and active campus comparables. Exposes all individual comparable observations,
+        their condition, sources, timestamps, and explicit data sufficiency state.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "200":
+          description: Pricing appraisal synthesized with itemized evidence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingAppraisalResponse"
+        "400":
+          description: Inspection analysis must be performed prior to pricing appraisal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inspections/{inspection_id}/defects/{defect_id}/dispute:
+    parameters:
+      - name: inspection_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: defect_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Inspection & Appraisal]
+      operationId: disputeDefectFinding
+      summary: Submit seller clarification or dispute for an observed finding
+      description: >
+        Allows the seller to clarify an AI finding (e.g., 'removable smudge, not a scratch').
+        Does not delete the immutable AI record; attaches a seller rebuttal for buyer transparency.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DefectDisputeRequest"
+      responses:
+        "200":
+          description: Dispute appended to finding record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DefectItem"
+        "404":
+          description: Finding not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /listings/{listing_id}/reservations:
+    parameters:
+      - name: listing_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Reservations]
+      operationId: getActiveListingReservation
+      summary: Retrieve the active reservation for a listing
+      description: Accessible by the listing seller or the reserving buyer. Returns 404 if listing is unreserved.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "200":
+          description: Active reservation record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationRecord"
+        "404":
+          description: No active reservation exists for this listing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags: [Reservations]
+      operationId: createListingReservation
+      summary: Place a no-payment pickup reservation on an active listing
+      description: Atomic transition. Rejects if another student holds an active reservation.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "201":
+          description: Reservation confirmed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationRecord"
+        "409":
+          description: Conflict (Item is already reserved or completed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /reservations/my:
+    get:
+      tags: [Reservations]
+      operationId: listMyReservations
+      summary: Retrieve listings reserved by the current student
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "200":
+          description: List of reservations with embedded listings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MyReservationItem"
+
+  /reservations/{reservation_id}/release:
+    parameters:
+      - name: reservation_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Reservations]
+      operationId: releaseReservation
+      summary: Release an active reservation back to available status
+      description: Either the reserving buyer or the seller may cancel the hold.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "200":
+          description: Reservation released; listing returned to active status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationRecord"
+        "403":
+          description: Forbidden (Actor is neither buyer nor seller)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /reservations/{reservation_id}/complete:
+    parameters:
+      - name: reservation_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Reservations]
+      operationId: completeReservation
+      summary: Confirm physical handoff and mark item sold or donated
+      description: Seller-only terminal action. Increments carbon telemetry and rewards points atomically.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteReservationRequest"
+      responses:
+        "200":
+          description: Transaction completed and impact telemetry attributed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompletedTransactionResponse"
+        "403":
+          description: Forbidden (Only the listing seller may complete the handoff)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /need-requests:
+    get:
+      tags: [Need It Requests]
+      operationId: listNeedItRequests
+      summary: Browse open campus want-requests
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ItemCategoryEnum"
+        - name: urgency
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/NeedUrgencyEnum"
+      responses:
+        "200":
+          description: List of campus need requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/NeedRequestRecord"
+    post:
+      tags: [Need It Requests]
+      operationId: createNeedItRequest
+      summary: Post a request for a needed item
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateNeedRequestPayload"
+      responses:
+        "201":
+          description: Need request published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NeedRequestRecord"
+
+  /need-requests/{request_id}:
+    parameters:
+      - name: request_id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      tags: [Need It Requests]
+      operationId: deleteNeedItRequest
+      summary: Delete or close a personal need request
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "204":
+          description: Request deleted
+        "403":
+          description: Forbidden (Not the requester)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /need-requests/{request_id}/matches:
+    parameters:
+      - name: request_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Need It Requests]
+      operationId: getMatchesForNeedRequest
+      summary: Query active campus marketplace listings matching this request
+      description: Returns heuristic keyword and category matches found in current marketplace inventory.
+      responses:
+        "200":
+          description: Matched catalog items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/NeedMatchResult"
+
+  /wishlist:
+    get:
+      tags: [Wishlist]
+      operationId: getMyWishlist
+      summary: Retrieve listings saved by the current student
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "200":
+          description: Array of saved listings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ListingSummary"
+    post:
+      tags: [Wishlist]
+      operationId: addToWishlist
+      summary: Save a listing to wishlist
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [listing_id]
+              properties:
+                listing_id:
+                  type: string
+      responses:
+        "201":
+          description: Item bookmarked
+        "404":
+          description: Listing not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /wishlist/{listing_id}:
+    parameters:
+      - name: listing_id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      tags: [Wishlist]
+      operationId: removeFromWishlist
+      summary: Remove a listing from wishlist
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "204":
+          description: Item removed from wishlist
+
+  /e-waste/requests:
+    get:
+      tags: [E-Waste Optimization]
+      operationId: listEWasteRequests
+      summary: List all campus e-waste collection requests
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/EWasteLifecycleStatusEnum"
+        - name: device_category
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/EWasteDeviceCategoryEnum"
+      responses:
+        "200":
+          description: List of logged collection requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EWasteRequestRecord"
+    post:
+      tags: [E-Waste Optimization]
+      operationId: submitEWasteRequest
+      summary: Submit end-of-life or repairable hardware for campus recovery
+      description: >
+        Submits physical electronics (laptops, phones, power banks, cables, etc.) specifying physical device category,
+        fault description, quantity, campus pickup coordinates, and preferred time slot.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEWasteSubmissionRequest"
+      responses:
+        "201":
+          description: E-waste pickup logged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EWasteRequestRecord"
+
+  /e-waste/cluster-and-optimize:
+    post:
+      tags: [E-Waste Optimization]
+      operationId: optimizeEWasteCollectionRoutes
+      summary: Run K-Means spatial clustering and TSP route sequencing
+      description: >
+        Partitions pending coordinates into zones via Scikit-Learn K-Means, computes shortest pickup
+        manifests via Haversine TSP nearest-neighbor algorithm, and updates status to 'scheduled'.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      parameters:
+        - name: zones_needed
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 2
+            minimum: 1
+            maximum: 10
+      responses:
+        "200":
+          description: Optimized collection routes generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EWasteOptimizationPlanResponse"
+        "400":
+          description: Insufficient coordinates to compute clustering
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /e-waste/{request_id}/lifecycle:
+    parameters:
+      - name: request_id
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [E-Waste Optimization]
+      operationId: updateEWasteLifecycleStatus
+      summary: Advance request lifecycle stage
+      description: >
+        Tracks progression: pending -> scheduled -> collected -> handed_over.
+        Terminal handovers record certified downstream e-waste recycler partner IDs.
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEWasteStatusRequest"
+      responses:
+        "200":
+          description: Lifecycle updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EWasteRequestRecord"
+        "400":
+          description: Invalid lifecycle transition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /sustainability/summary:
+    get:
+      tags: [Sustainability & Leaderboard]
+      operationId: getSustainabilitySummary
+      summary: Retrieve campus and personal carbon telemetry
+      description: >
+        Returns aggregate landfill diversion metrics, avoided CO2e in kg, completed reuse counts,
+        and methodology references. Differentiates verified facts from directional estimates.
+      responses:
+        "200":
+          description: Sustainability metrics summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SustainabilitySummaryResponse"
+
+  /leaderboard:
+    get:
+      tags: [Sustainability & Leaderboard]
+      operationId: getCampusLeaderboard
+      summary: Campus peer sustainability standings
+      parameters:
+        - name: campus_id
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ranked campus standings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LeaderboardStandingItem"
+
+  /notifications:
+    get:
+      tags: [Messaging & Notifications]
+      operationId: getMyNotifications
+      summary: Retrieve in-app notifications feed
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "200":
+          description: Notifications list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/NotificationItem"
+
+  /notifications/{notification_id}/read:
+    parameters:
+      - name: notification_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Messaging & Notifications]
+      operationId: markNotificationAsRead
+      summary: Mark notification as read
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "200":
+          description: Notification marked as read
+
+  /notifications/read-all:
+    post:
+      tags: [Messaging & Notifications]
+      operationId: markAllNotificationsAsRead
+      summary: Mark all notifications as read
+      security:
+        - BearerAuth: []
+        - DemoUserHeader: []
+      responses:
+        "200":
+          description: All notifications marked as read
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: PocketBase or standard JWT token.
+    DemoUserHeader:
+      type: apiKey
+      in: header
+      name: X-Camplx-Demo-User-Id
+      description: >
+        Development and demo identity bypass header (e.g. a0000000-0000-0000-0000-000000000001).
+        Strictly disallowed and ignored in production environments.
+
+  schemas:
+    ItemCategoryEnum:
+      type: string
+      enum: [electronics, books, cycles, furniture, hostel_essentials, other]
+
+    ListingTypeEnum:
+      type: string
+      enum: [sell, donate]
+
+    ListingStatusEnum:
+      type: string
+      enum: [active, reserved, sold, donated, inactive]
+
+    SellerListingStatusUpdateEnum:
+      type: string
+      enum: [active, inactive]
+      description: Only active or inactive toggles are permitted via listing edits. Reserved and terminal states are workflow-gated.
+
+    ConditionGradeEnum:
+      type: string
+      enum: [Like New, Good, Fair, Needs Repair]
+
+    LifecycleCategoryEnum:
+      type: string
+      enum: [Reusable, Repairable, End-of-life]
+
+    EWasteDeviceCategoryEnum:
+      type: string
+      enum:
+        - laptops_and_computers
+        - phones_and_tablets
+        - batteries_and_power_banks
+        - chargers_and_cables
+        - printers_and_peripherals
+        - audio_and_accessories
+        - other_electronics
+
+    ReservationStatusEnum:
+      type: string
+      enum: [active, released, completed]
+
+    NeedUrgencyEnum:
+      type: string
+      enum: [low, normal, urgent]
+
+    EWasteLifecycleStatusEnum:
+      type: string
+      enum: [pending, scheduled, collected, handed_over]
+
+    DataSufficiencyEnum:
+      type: string
+      enum: [sufficient, limited, insufficient]
+
+    ComparableSourceTypeEnum:
+      type: string
+      enum:
+        [
+          internal_camplx_active,
+          internal_camplx_sold,
+          external_marketplace,
+          catalog_benchmark,
+        ]
+
+    AttributeProvenanceEnum:
+      type: string
+      enum: [visually_verified, seller_supplied, catalog_inferred, ai_estimated]
+      description: Provenance classification for product attributes, distinguishing observations from inference.
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: INVALID_STATE_TRANSITION
+        message:
+          type: string
+          example: This listing is already reserved by another student.
+        details:
+          type: object
+          additionalProperties: true
+
+    HealthStatusResponse:
+      type: object
+      required:
+        - status
+        - timestamp
+        - database_connected
+        - ai_service_available
+      properties:
+        status:
+          type: string
+          example: ok
+        timestamp:
+          type: string
+          format: date-time
+        database_connected:
+          type: boolean
+          example: true
+        ai_service_available:
+          type: boolean
+          example: true
+
+    DemoSessionRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+          example: aarav.sharma@dpu.edu.in
+        display_name:
+          type: string
+          example: Aarav Sharma
+
+    AuthSessionResponse:
+      type: object
+      required:
+        - token
+        - user
+      properties:
+        token:
+          type: string
+          example: demo_jwt_token_camplx
+        user:
+          $ref: "#/components/schemas/UserProfileResponse"
+
+    UserProfileResponse:
+      type: object
+      required:
+        - id
+        - email
+        - display_name
+        - verified_student
+        - campus_id
+        - campus_name
+        - points
+        - cumulative_carbon_g
+      properties:
+        id:
+          type: string
+          example: a0000000-0000-0000-0000-000000000001
+        email:
+          type: string
+          format: email
+          example: aarav.sharma@dpu.edu.in
+        display_name:
+          type: string
+          example: Aarav Sharma
+        avatar_url:
+          type: [string, "null"]
+        verified_student:
+          type: boolean
+          example: true
+        campus_id:
+          type: string
+          example: 11111111-1111-1111-1111-111111111111
+        campus_name:
+          type: string
+          example: Dr. D. Y. Patil Vidyapeeth (DPU Pune)
+        points:
+          type: integer
+          example: 420
+        cumulative_carbon_g:
+          type: integer
+          example: 32500
+
+    PublicSellerProfileResponse:
+      type: object
+      required:
+        - id
+        - display_name
+        - verified_student
+        - campus_id
+        - campus_name
+        - points
+        - cumulative_carbon_g
+      properties:
+        id:
+          type: string
+          example: a0000000-0000-0000-0000-000000000001
+        display_name:
+          type: string
+          example: Aarav Sharma
+        avatar_url:
+          type: [string, "null"]
+        verified_student:
+          type: boolean
+          example: true
+        campus_id:
+          type: string
+          example: 11111111-1111-1111-1111-111111111111
+        campus_name:
+          type: string
+          example: Dr. D. Y. Patil Vidyapeeth (DPU Pune)
+        points:
+          type: integer
+          example: 420
+        cumulative_carbon_g:
+          type: integer
+          example: 32500
+
+    UserProfileUpdateRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+          minLength: 2
+        avatar_url:
+          type: [string, "null"]
+
+    InspectionImageRecord:
+      type: object
+      required:
+        - id
+        - image_url
+        - display_order
+        - angle_label
+      properties:
+        id:
+          type: string
+          example: img_capture_01
+        image_url:
+          type: string
+          format: uri
+          example: https://api.camplx.internal/media/inspections/raw_01.jpg
+        annotated_image_url:
+          type: [string, "null"]
+          format: uri
+          description: URL of derived image asset with overlay bounding boxes rendered for this specific capture angle.
+          example: https://api.camplx.internal/media/inspections/annotated_01.jpg
+        display_order:
+          type: integer
+          example: 0
+        angle_label:
+          type: string
+          example: front
+
+    DefectItem:
+      type: object
+      required:
+        - id
+        - image_id
+        - defect_type
+        - severity
+        - box_2d
+        - buyer_note
+        - dispute_status
+      properties:
+        id:
+          type: string
+          example: def-1
+        image_id:
+          type: string
+          description: Identifies the exact InspectionImageRecord on which this defect was observed.
+          example: img_capture_01
+        defect_type:
+          type: string
+          example: Bezel Scuff
+        severity:
+          type: string
+          example: Cosmetic Minor
+        box_2d:
+          type: array
+          items:
+            type: integer
+          minItems: 4
+          maxItems: 4
+          description: Normalized coordinates in exact order [ymin, xmin, ymax, xmax] scaled 0 to 1000 in source image space.
+          example: [120, 160, 260, 420]
+        buyer_note:
+          type: string
+          example: Light surface scuff on outer border plastic. Glass display untouched.
+        dispute_status:
+          type: string
+          enum: [none, disputed_by_seller, resolved]
+          default: none
+        seller_dispute_note:
+          type: [string, "null"]
+
+    DefectDisputeRequest:
+      type: object
+      required:
+        - seller_note
+      properties:
+        seller_note:
+          type: string
+          example: This mark is adhesive residue from a label and wipes clean; it is not a deep groove.
+
+    ComparableListingItem:
+      type: object
+      required:
+        - id
+        - title
+        - price
+        - currency
+        - condition
+        - source_type
+        - source_name
+        - observed_at
+      properties:
+        id:
+          type: string
+          example: comp-5541
+        title:
+          type: string
+          example: Casio FX-991EX ClassWiz (Engineering Batch Resale)
+        price:
+          type: number
+          example: 1000
+        currency:
+          type: string
+          default: INR
+          example: INR
+        condition:
+          $ref: "#/components/schemas/ConditionGradeEnum"
+        source_type:
+          $ref: "#/components/schemas/ComparableSourceTypeEnum"
+        source_name:
+          type: string
+          example: Camplx Campus Resale History
+        source_url:
+          type: [string, "null"]
+          format: uri
+        observed_at:
+          type: string
+          format: date-time
+          example: 2026-09-18T14:32:00Z
+
+    PricingIntelligence:
+      type: object
+      required:
+        - data_sufficiency
+        - recommended_listing_price
+        - pricing_rationale
+        - comparables
+        - comparables_count
+      properties:
+        data_sufficiency:
+          $ref: "#/components/schemas/DataSufficiencyEnum"
+        insufficient_data_reason:
+          type: [string, "null"]
+          example: Limited comparable volume for this specific hardware revision; valuation based on category benchmark.
+        estimated_retail_new:
+          type: [number, "null"]
+          example: 1495
+        typical_used_market_price:
+          type: [number, "null"]
+          example: 1050
+        condition_penalty_amount:
+          type: [number, "null"]
+          example: 100
+        recommended_min_price:
+          type: [number, "null"]
+          example: 850
+        recommended_listing_price:
+          type: [number, "null"]
+          example: 950
+        recommended_max_price:
+          type: [number, "null"]
+          example: 1100
+        pricing_rationale:
+          type: string
+          example: High exam demand on campus; recommended price is 36% below current bookstore retail.
+        comparables_count:
+          type: integer
+          example: 3
+        comparables:
+          type: array
+          items:
+            $ref: "#/components/schemas/ComparableListingItem"
+
+    AmazonStyleListing:
+      type: object
+      required:
+        - title
+        - key_features_bullets
+        - technical_specifications
+        - seller_condition_summary
+      properties:
+        title:
+          type: string
+          example: Casio FX-991EX ClassWiz Scientific Calculator (552 Functions, Solar)
+        key_features_bullets:
+          type: array
+          items:
+            type: string
+          example:
+            - High-resolution natural textbook LCD display.
+            - 552 scientific functions including matrix and calculus.
+            - Dual power source (solar and backup battery).
+        technical_specifications:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            Brand: Casio
+            Model: FX-991EX
+            Power: Solar + Battery
+        seller_condition_summary:
+          type: string
+          example: Like New condition with minor packaging wear.
+
+    CreateInspectionSessionRequest:
+      type: object
+      required:
+        - item_category
+      properties:
+        item_category:
+          $ref: "#/components/schemas/ItemCategoryEnum"
+        seller_notes:
+          type: string
+          example: Used for one semester in mechanical engineering.
+
+    InspectionSessionResponse:
+      type: object
+      required:
+        - inspection_id
+        - status
+        - report_version
+        - item_category
+        - created_at
+      properties:
+        inspection_id:
+          type: string
+          example: insp_987213
+        status:
+          type: string
+          enum: [created, images_uploaded, analyzed, completed]
+        report_version:
+          type: integer
+          example: 1
+        item_category:
+          $ref: "#/components/schemas/ItemCategoryEnum"
+        created_at:
+          type: string
+          format: date-time
+
+    InspectionAnalysisResultResponse:
+      type: object
+      required:
+        - inspection_id
+        - report_version
+        - identified_product_name
+        - brand
+        - model
+        - category
+        - overall_condition
+        - circular_lifecycle_category
+        - defects
+        - amazon_listing
+        - images
+        - specification_provenance
+      properties:
+        inspection_id:
+          type: string
+        report_version:
+          type: integer
+          example: 1
+        identified_product_name:
+          type: string
+          example: Casio FX-991EX ClassWiz Scientific Calculator
+        brand:
+          type: [string, "null"]
+          example: Casio
+        model:
+          type: [string, "null"]
+          example: FX-991EX ClassWiz
+        category:
+          type: string
+          example: electronics
+        overall_condition:
+          $ref: "#/components/schemas/ConditionGradeEnum"
+        circular_lifecycle_category:
+          $ref: "#/components/schemas/LifecycleCategoryEnum"
+        defects:
+          type: array
+          items:
+            $ref: "#/components/schemas/DefectItem"
+        amazon_listing:
+          $ref: "#/components/schemas/AmazonStyleListing"
+        images:
+          type: array
+          description: Multi-angle image assets including individual annotated overlays where defects were detected.
+          items:
+            $ref: "#/components/schemas/InspectionImageRecord"
+        specification_provenance:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/AttributeProvenanceEnum"
+          example:
+            Brand: visually_verified
+            Model: visually_verified
+            Power: catalog_inferred
+
+    InspectionRecordResponse:
+      type: object
+      required:
+        - inspection_id
+        - status
+        - report_version
+        - item_category
+        - images
+        - created_at
+      properties:
+        inspection_id:
+          type: string
+        status:
+          type: string
+          enum: [created, images_uploaded, analyzed, completed]
+        report_version:
+          type: integer
+          example: 1
+        item_category:
+          $ref: "#/components/schemas/ItemCategoryEnum"
+        seller_notes:
+          type: [string, "null"]
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/InspectionImageRecord"
+        analysis:
+          anyOf:
+            - $ref: "#/components/schemas/InspectionAnalysisResultResponse"
+            - type: "null"
+        pricing:
+          anyOf:
+            - $ref: "#/components/schemas/PricingIntelligence"
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PricingAppraisalResponse:
+      type: object
+      required:
+        - inspection_id
+        - pricing
+        - currency
+      properties:
+        inspection_id:
+          type: string
+        pricing:
+          $ref: "#/components/schemas/PricingIntelligence"
+        currency:
+          type: string
+          default: INR
+
+    CreateListingRequest:
+      type: object
+      required:
+        - title
+        - category
+        - condition
+        - listing_type
+        - image_urls
+      properties:
+        title:
+          type: string
+          example: Casio FX-991EX ClassWiz Scientific Calculator
+        brand:
+          type: [string, "null"]
+          example: Casio
+        model:
+          type: [string, "null"]
+          example: FX-991EX
+        description:
+          type: [string, "null"]
+        category:
+          $ref: "#/components/schemas/ItemCategoryEnum"
+        condition:
+          $ref: "#/components/schemas/ConditionGradeEnum"
+        listing_type:
+          $ref: "#/components/schemas/ListingTypeEnum"
+        asking_price:
+          type: [number, "null"]
+          description: Required when listing_type is 'sell'. Must be null for 'donate'.
+          example: 950
+        inspection_id:
+          type: [string, "null"]
+        technical_specifications:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            Power: Solar & Battery
+            Functions: "552"
+        specification_provenance:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/AttributeProvenanceEnum"
+        image_urls:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          example:
+            - https://api.camplx.internal/media/inspections/raw_01.jpg
+
+    UpdateListingRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: [string, "null"]
+        asking_price:
+          type: [number, "null"]
+        status:
+          $ref: "#/components/schemas/SellerListingStatusUpdateEnum"
+
+    ListingSummary:
+      type: object
+      required:
+        - id
+        - seller_id
+        - title
+        - category
+        - condition
+        - listing_type
+        - status
+        - primary_image_url
+        - created_at
+      properties:
+        id:
+          type: string
+        seller_id:
+          type: string
+        title:
+          type: string
+        brand:
+          type: [string, "null"]
+          example: Casio
+        model:
+          type: [string, "null"]
+          example: FX-991EX
+        category:
+          $ref: "#/components/schemas/ItemCategoryEnum"
+        condition:
+          $ref: "#/components/schemas/ConditionGradeEnum"
+        listing_type:
+          $ref: "#/components/schemas/ListingTypeEnum"
+        asking_price:
+          type: [number, "null"]
+        status:
+          $ref: "#/components/schemas/ListingStatusEnum"
+        carbon_savings_g:
+          type: integer
+          example: 3500
+        primary_image_url:
+          type: string
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+
+    ListingDetailResponse:
+      type: object
+      required:
+        - id
+        - seller_id
+        - seller_name
+        - campus_id
+        - title
+        - category
+        - condition
+        - listing_type
+        - status
+        - images
+        - created_at
+      properties:
+        id:
+          type: string
+        seller_id:
+          type: string
+        seller_name:
+          type: string
+          example: Aarav Sharma
+        campus_id:
+          type: string
+        title:
+          type: string
+        brand:
+          type: [string, "null"]
+          example: Casio
+        model:
+          type: [string, "null"]
+          example: FX-991EX
+        description:
+          type: [string, "null"]
+        category:
+          $ref: "#/components/schemas/ItemCategoryEnum"
+        condition:
+          $ref: "#/components/schemas/ConditionGradeEnum"
+        listing_type:
+          $ref: "#/components/schemas/ListingTypeEnum"
+        asking_price:
+          type: [number, "null"]
+        status:
+          $ref: "#/components/schemas/ListingStatusEnum"
+        carbon_savings_g:
+          type: integer
+          example: 3500
+        technical_specifications:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            Power: Solar + Battery
+        specification_provenance:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/AttributeProvenanceEnum"
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/InspectionImageRecord"
+        inspection:
+          anyOf:
+            - $ref: "#/components/schemas/InspectionAnalysisResultResponse"
+            - type: "null"
+        pricing_intelligence:
+          anyOf:
+            - $ref: "#/components/schemas/PricingIntelligence"
+            - type: "null"
+        active_reservation:
+          anyOf:
+            - $ref: "#/components/schemas/ReservationRecord"
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+
+    PaginatedListingsResponse:
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - per_page
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ListingSummary"
+        total:
+          type: integer
+        page:
+          type: integer
+        per_page:
+          type: integer
+
+    SellerProfileWithListingsResponse:
+      type: object
+      required:
+        - seller
+        - listings
+      properties:
+        seller:
+          $ref: "#/components/schemas/PublicSellerProfileResponse"
+        listings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ListingSummary"
+
+    ReservationRecord:
+      type: object
+      required:
+        - id
+        - listing_id
+        - buyer_id
+        - buyer_name
+        - status
+        - created_at
+      properties:
+        id:
+          type: string
+          example: res-102938
+        listing_id:
+          type: string
+          example: list-1
+        buyer_id:
+          type: string
+          example: b0000000-0000-0000-0000-000000000002
+        buyer_name:
+          type: string
+          example: Priya Nair
+        status:
+          $ref: "#/components/schemas/ReservationStatusEnum"
+        created_at:
+          type: string
+          format: date-time
+
+    MyReservationItem:
+      type: object
+      required:
+        - reservation
+        - listing
+      properties:
+        reservation:
+          $ref: "#/components/schemas/ReservationRecord"
+        listing:
+          $ref: "#/components/schemas/ListingSummary"
+
+    CompleteReservationRequest:
+      type: object
+      required:
+        - outcome
+      properties:
+        outcome:
+          type: string
+          enum: [sold, donated]
+
+    CompletedTransactionResponse:
+      type: object
+      required:
+        - reservation_id
+        - listing_id
+        - final_status
+        - carbon_savings_g
+        - points_awarded
+      properties:
+        reservation_id:
+          type: string
+        listing_id:
+          type: string
+        final_status:
+          type: string
+          enum: [sold, donated]
+        carbon_savings_g:
+          type: integer
+          example: 3500
+        points_awarded:
+          type: integer
+          example: 50
+
+    CreateNeedRequestPayload:
+      type: object
+      required:
+        - title
+        - category
+      properties:
+        title:
+          type: string
+          example: Casio 991EX for semester end exams
+        note:
+          type: [string, "null"]
+        category:
+          $ref: "#/components/schemas/ItemCategoryEnum"
+        urgency:
+          $ref: "#/components/schemas/NeedUrgencyEnum"
+          default: normal
+
+    NeedRequestRecord:
+      type: object
+      required:
+        - id
+        - requester_id
+        - requester_name
+        - title
+        - category
+        - urgency
+        - created_at
+      properties:
+        id:
+          type: string
+        requester_id:
+          type: string
+        requester_name:
+          type: string
+        title:
+          type: string
+        note:
+          type: [string, "null"]
+        category:
+          $ref: "#/components/schemas/ItemCategoryEnum"
+        urgency:
+          $ref: "#/components/schemas/NeedUrgencyEnum"
+        created_at:
+          type: string
+          format: date-time
+
+    NeedMatchResult:
+      type: object
+      required:
+        - listing
+        - match_reason
+      properties:
+        listing:
+          $ref: "#/components/schemas/ListingSummary"
+        match_reason:
+          type: string
+          example: Keyword 'casio' matched title in electronics category.
+
+    CreateEWasteSubmissionRequest:
+      type: object
+      required:
+        - description
+        - device_category
+        - quantity
+        - latitude
+        - longitude
+        - location_name
+        - preferred_slot
+      properties:
+        description:
+          type: string
+          example: Dell Inspiron with dead motherboard & swollen battery
+        device_category:
+          $ref: "#/components/schemas/EWasteDeviceCategoryEnum"
+        lifecycle_assessment:
+          $ref: "#/components/schemas/LifecycleCategoryEnum"
+          default: End-of-life
+        quantity:
+          type: integer
+          minimum: 1
+          example: 1
+        latitude:
+          type: number
+          format: double
+          example: 18.6251
+        longitude:
+          type: number
+          format: double
+          example: 73.8198
+        location_name:
+          type: string
+          example: Tech Block B, DPU Campus
+        preferred_slot:
+          type: string
+          example: Morning (10:00 AM - 1:00 PM)
+
+    EWasteRequestRecord:
+      type: object
+      required:
+        - id
+        - student_id
+        - description
+        - device_category
+        - lifecycle_assessment
+        - quantity
+        - location_name
+        - status
+        - estimated_carbon_kg
+        - created_at
+      properties:
+        id:
+          type: string
+        student_id:
+          type: string
+        description:
+          type: string
+        device_category:
+          $ref: "#/components/schemas/EWasteDeviceCategoryEnum"
+        lifecycle_assessment:
+          $ref: "#/components/schemas/LifecycleCategoryEnum"
+        quantity:
+          type: integer
+        latitude:
+          type: number
+        longitude:
+          type: number
+        location_name:
+          type: string
+        preferred_slot:
+          type: string
+        status:
+          $ref: "#/components/schemas/EWasteLifecycleStatusEnum"
+        zone_cluster_id:
+          type: [integer, "null"]
+        pickup_sequence_order:
+          type: [integer, "null"]
+        estimated_carbon_kg:
+          type: number
+          example: 34.5
+        created_at:
+          type: string
+          format: date-time
+
+    UpdateEWasteStatusRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          $ref: "#/components/schemas/EWasteLifecycleStatusEnum"
+        handler_notes:
+          type: [string, "null"]
+        certified_partner_id:
+          type: [string, "null"]
+
+    EWasteOptimizationPlanResponse:
+      type: object
+      required:
+        - message
+        - total_stops_optimized
+        - routes_generated
+      properties:
+        message:
+          type: string
+          example: Clustering complete and routes sequenced.
+        total_stops_optimized:
+          type: integer
+          example: 4
+        routes_generated:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+            description: Ordered sequence of request IDs.
+          example:
+            Zone 0: [ewaste-1, ewaste-2]
+            Zone 1: [ewaste-3]
+
+    SustainabilitySummaryResponse:
+      type: object
+      required:
+        - personal_carbon_kg
+        - campus_carbon_kg
+        - items_reused_count
+        - ewaste_diverted_kg
+        - methodology_note
+      properties:
+        personal_carbon_kg:
+          type: number
+          example: 32.5
+        campus_carbon_kg:
+          type: number
+          example: 1840.2
+        items_reused_count:
+          type: integer
+          example: 142
+        ewaste_diverted_kg:
+          type: number
+          example: 124.8
+        methodology_note:
+          type: string
+          example: Directional CO2e savings based on standard embodied carbon displacement values.
+
+    LeaderboardStandingItem:
+      type: object
+      required:
+        - rank
+        - user_id
+        - display_name
+        - points
+        - carbon_saved_kg
+      properties:
+        rank:
+          type: integer
+          example: 1
+        user_id:
+          type: string
+        display_name:
+          type: string
+          example: Aarav Sharma
+        points:
+          type: integer
+          example: 420
+        carbon_saved_kg:
+          type: number
+          example: 32.5
+
+    NotificationItem:
+      type: object
+      required:
+        - id
+        - type
+        - actor_name
+        - message
+        - read
+        - created_at
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [like, reservation, request, message, system]
+        actor_name:
+          type: string
+          example: Priya Nair
+        message:
+          type: string
+          example: Priya Nair placed a pickup hold on your Casio Calculator.
+        read:
+          type: boolean
+          example: false
+        target_entity_type:
+          type: [string, "null"]
+          enum: [listing, reservation, need_request, chat]
+        target_entity_id:
+          type: [string, "null"]
+        created_at:
+          type: string
+          format: date-time

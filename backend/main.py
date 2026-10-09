@@ -2,7 +2,6 @@ import os
 import json
 import logging
 import base64
-from PIL import ImageDraw
 from typing import Dict, List, Optional
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +9,7 @@ from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageDraw
 import io
 import numpy as np
 from sklearn.cluster import KMeans
@@ -70,11 +69,7 @@ class AmazonStyleDescription(BaseModel):
     technical_specifications: Dict[str, str] = Field(description="Key-value pairs of technical specifications extracted or inferred (Brand, Model, Color, Category, etc.), with values represented as strings")
     seller_condition_summary: str = Field(description="Concise condition assessment summary for the product page")
 
-# 2. Add this NEW schema for the final FastAPI response
-class AnnotatedProductResponse(BaseModel):
-    analysis: ProductAnalysisResponse
-    annotated_image_base64: str
-    
+# ProductAnalysisResponse must be defined FIRST
 class ProductAnalysisResponse(BaseModel):
     identified_product_name: str
     category: str
@@ -85,7 +80,12 @@ class ProductAnalysisResponse(BaseModel):
     defects: List[DefectAnnotation]
     pricing: PricingIntelligence
     amazon_listing: AmazonStyleDescription
-    
+
+# AnnotatedProductResponse references ProductAnalysisResponse, so it comes SECOND
+class AnnotatedProductResponse(BaseModel):
+    analysis: ProductAnalysisResponse
+    annotated_image_base64: str
+
 class EWasteSubmission(BaseModel):
     student_id: str
     item_category: str
@@ -109,7 +109,8 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
 def optimize_tsp_route(locations):
     """Nearest-neighbor algorithm to sequence pickups efficiently."""
-    if not locations: return []
+    if not locations: 
+        return []
     unvisited = locations.copy()
     current = unvisited.pop(0)
     ordered_ids = [current['id']]
@@ -143,24 +144,27 @@ def submit_ewaste_request(request: EWasteSubmission, db: Session = Depends(get_d
 
 
 @app.post("/api/e-waste/cluster-and-optimize")
-def run_clustering_and_routing(zones_needed: int = 3, db: Session = Depends(get_db)):
+def run_clustering_and_routing(zones_needed: int = 2, db: Session = Depends(get_db)):
     """
     Step 2: Groups nearby PENDING requests into zones using K-Means, 
     generates a collection order, and upgrades status to SCHEDULED.
     """
-    pending_requests = db.query(EWasteRequest).filter(EWasteRequest.status == LifecycleStatus.PENDING).all()
+    all_requests = db.query(EWasteRequest).all()
     
-    if len(pending_requests) < zones_needed:
-        return {"error": "Not enough pending requests to form clusters."}
+    if len(all_requests) < zones_needed:
+        # Fallback if fewer requests than zones
+        zones_needed = max(1, len(all_requests))
 
-    # Extract coordinates for K-Means clustering
-    coords = np.array([[req.latitude, req.longitude] for req in pending_requests])
+    if not all_requests:
+        return {"error": "No requests available to cluster."}
+
+    coords = np.array([[req.latitude, req.longitude] for req in all_requests])
     
     # 1. Cluster into geographic zones
     kmeans = KMeans(n_clusters=zones_needed, n_init=10, random_state=42)
     labels = kmeans.fit_predict(coords)
 
-    for i, req in enumerate(pending_requests):
+    for i, req in enumerate(all_requests):
         req.zone_cluster_id = int(labels[i])
         
     db.commit()
@@ -168,13 +172,12 @@ def run_clustering_and_routing(zones_needed: int = 3, db: Session = Depends(get_
     # 2. Optimize routes within each cluster zone
     optimized_routes = {}
     for zone in range(zones_needed):
-        zone_reqs = [r for r in pending_requests if r.zone_cluster_id == zone]
+        zone_reqs = [r for r in all_requests if r.zone_cluster_id == zone]
         loc_data = [{'id': r.id, 'lat': r.latitude, 'lon': r.longitude} for r in zone_reqs]
         
         sequence = optimize_tsp_route(loc_data)
         optimized_routes[f"Zone {zone}"] = sequence
         
-        # Apply the order sequence and transition state to SCHEDULED
         for order_index, req_id in enumerate(sequence):
             req_to_update = next(r for r in zone_reqs if r.id == req_id)
             req_to_update.pickup_sequence_order = order_index + 1
@@ -182,7 +185,7 @@ def run_clustering_and_routing(zones_needed: int = 3, db: Session = Depends(get_
 
     db.commit()
     return {
-        "message": "Step 2 Complete. Requests clustered and routes optimized.",
+        "message": "Clustering complete and routes optimized.",
         "routes_generated": optimized_routes
     }
 
@@ -220,7 +223,7 @@ Analyze the uploaded product image in detail:
    - Create a clean title formatted as: "[Brand] [Model] - [Key Spec/Attribute] ([Condition Grade])".
    - Create 4 to 5 bullet points in standard "About this item" e-commerce format.
    - Extract key-value technical specifications.
-5. Circular Economy Routing (per project mission):
+5. Circular Economy Routing:
    - Categorize into "Reusable", "Repairable", or "End-of-life" (e-waste).
 
 Return only a JSON object with exactly these fields and value types:
@@ -261,11 +264,8 @@ async def inspect_and_generate_listing(
         raise HTTPException(status_code=400, detail="Uploaded file must be an image.")
 
     try:
-        # Read image bytes and open with PIL
         image_bytes = await image.read()
-        pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB") # Convert to RGB for drawing
-        
-        # Keep a copy for drawing so we don't alter the one sent to Gemini
+        pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         draw_image = pil_image.copy()
 
         user_content = [
@@ -273,7 +273,6 @@ async def inspect_and_generate_listing(
             f"Inspect this item for sale on our campus marketplace. Seller Notes: '{seller_notes or 'None provided'}'. Campus: '{campus_location}'."
         ]
 
-        # Call Gemini
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=user_content,
@@ -286,6 +285,7 @@ async def inspect_and_generate_listing(
 
         if not response.text or not response.text.strip():
             raise HTTPException(status_code=502, detail="AI analysis provider returned an empty response.")
+        
         try:
             ai_analysis = ProductAnalysisResponse.model_validate_json(response.text)
         except (json.JSONDecodeError, ValidationError) as exc:
@@ -297,28 +297,18 @@ async def inspect_and_generate_listing(
         img_width, img_height = draw_image.size
 
         for defect in ai_analysis.defects:
-            # Gemini returns [ymin, xmin, ymax, xmax] normalized 0-1000
             ymin, xmin, ymax, xmax = defect.box_2d
-            
-            # Convert 0-1000 scale to actual image pixels
             top = (ymin / 1000) * img_height
             left = (xmin / 1000) * img_width
             bottom = (ymax / 1000) * img_height
             right = (xmax / 1000) * img_width
 
-            # Draw a thick red rectangle
             draw.rectangle([left, top, right, bottom], outline="red", width=5)
-            
-            # Optional: Add a small text label above the box
-            label = f"{defect.defect_type} ({defect.severity})"
-            draw.text((left, top - 15), label, fill="red")
 
-        # Convert the drawn image to a Base64 string
         buffered = io.BytesIO()
         draw_image.save(buffered, format="JPEG", quality=85)
         img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        # Return the AI data PLUS the drawn image
         return AnnotatedProductResponse(
             analysis=ai_analysis,
             annotated_image_base64=img_base64

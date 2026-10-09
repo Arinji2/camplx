@@ -1,3 +1,10 @@
 __pycache__/
 venv/
+.venv/
 .env
+bin/
+pb_data/
+pb_migrations/
+*.pb
+pb_serve.log
+uvicorn.log

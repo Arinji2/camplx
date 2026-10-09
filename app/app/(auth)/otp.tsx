@@ -7,18 +7,18 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { ShieldCheck } from "lucide-react-native";
+import { ShieldCheck, Sparkles } from "lucide-react-native";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import { Button } from "@/components/Button";
 import { colors, gradients, shadows } from "@/lib/theme";
-import { requestOtp, verifyOtp } from "@/services/authService";
+import { DEMO_CAMPUS, DEMO_USER } from "@/lib/database";
+import { useAuthStore } from "@/stores/authStore";
 
-/** Shared input styling from the design system, tuned for a centered code. */
 const CODE_INPUT_CLASS =
   "rounded-2xl border border-border bg-surface px-4 py-3.5 text-center text-2xl font-jakartaBold tracking-widest text-ink";
 
@@ -26,22 +26,15 @@ const otpSchema = z.object({
   code: z
     .string()
     .trim()
-    .regex(/^\d{6}$/, "Enter the 6-digit code"),
+    .regex(/^\d{6}$/, "Enter any 6-digit code (e.g. 123456)"),
 });
 
 type OtpForm = z.infer<typeof otpSchema>;
 
-/**
- * OTP Entry screen (design §4.2 `(auth)/otp.tsx`, Req 1.4–1.7, 10.1).
- * Reads the `email` param, verifies the 6-digit code, and — on success — the
- * root auth gate routes into the app. Shows invalid/expired errors and a
- * resend action.
- */
 export default function OtpScreen() {
+  const router = useRouter();
   const { email } = useLocalSearchParams<{ email: string }>();
   const [submitting, setSubmitting] = useState(false);
-  const [resending, setResending] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const {
@@ -50,36 +43,33 @@ export default function OtpScreen() {
     formState: { errors },
   } = useForm<OtpForm>({
     resolver: zodResolver(otpSchema),
-    defaultValues: { code: "" },
+    defaultValues: { code: "123456" },
   });
 
-  async function onSubmit({ code }: OtpForm) {
-    if (submitting || !email) return; // duplicate-submission guard (Req 10.3)
-    setSubmitting(true);
-    setFormError(null);
-    setNotice(null);
-    try {
-      await verifyOtp(email, code); // Req 1.4; gate routes on success
-    } catch {
-      // Invalid or expired code — offer resend (Req 1.5, 1.7).
-      setFormError("That code is invalid or expired. Request a new one.");
-    } finally {
-      setSubmitting(false);
-    }
+  function enterApp(userEmail?: string) {
+    const actingEmail = userEmail || email || DEMO_USER.email;
+    useAuthStore.getState().setProfile({
+      id: DEMO_USER.id,
+      email: actingEmail,
+      verified_student: true,
+      campus_id: DEMO_CAMPUS.id,
+      display_name: actingEmail.split("@")[0] || DEMO_USER.display_name,
+      points: DEMO_USER.points,
+      cumulative_carbon_g: DEMO_USER.cumulative_carbon_g,
+    });
+    useAuthStore.getState().setStatus("authenticated");
+    router.replace("/(tabs)");
   }
 
-  async function onResend() {
-    if (resending || !email) return;
-    setResending(true);
-    setFormError(null);
+  async function onSubmit({ code: _code }: OtpForm) {
+    if (submitting) return;
+    setSubmitting(true);
     setNotice(null);
     try {
-      await requestOtp(email); // Req 1.7, 10.1
-      setNotice("A new code is on its way.");
-    } catch {
-      setFormError("We couldn't resend your code. Please try again.");
+      // In demo mode: accept any 6 digits and enter immediately
+      enterApp(email);
     } finally {
-      setResending(false);
+      setSubmitting(false);
     }
   }
 
@@ -94,8 +84,8 @@ export default function OtpScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Branded header — gradient badge + title */}
-          <View className="mb-10 items-center">
+          {/* Branded header */}
+          <View className="mb-8 items-center">
             <LinearGradient
               colors={gradients.authHeader as unknown as [string, string]}
               start={{ x: 0, y: 0 }}
@@ -109,13 +99,16 @@ export default function OtpScreen() {
               Enter your code
             </Text>
             <Text className="mt-2 text-center text-base font-jakarta text-muted">
-              We sent a 6-digit code to {email ?? "your email"}.
+              Demo code is auto-filled below for{"\n"}
+              <Text className="font-jakartaBold text-ink">
+                {email || DEMO_USER.email}
+              </Text>
             </Text>
           </View>
 
           {/* Code field */}
           <Text className="mb-2 text-sm font-jakartaSemibold text-ink">
-            Code
+            Verification Code
           </Text>
           <Controller
             control={control}
@@ -139,11 +132,6 @@ export default function OtpScreen() {
               {errors.code.message}
             </Text>
           ) : null}
-          {formError ? (
-            <Text className="mt-2 text-sm font-jakartaMedium text-danger-text">
-              {formError}
-            </Text>
-          ) : null}
           {notice ? (
             <Text className="mt-2 text-sm font-jakartaMedium text-green-700">
               {notice}
@@ -153,7 +141,7 @@ export default function OtpScreen() {
           {/* Verify code */}
           <View className="mt-7">
             <Button
-              label="Verify"
+              label="Verify & Enter Marketplace"
               variant="primary"
               size="lg"
               fullWidth
@@ -162,15 +150,15 @@ export default function OtpScreen() {
             />
           </View>
 
-          {/* Resend code */}
+          {/* Instant bypass demo button */}
           <View className="mt-3">
             <Button
-              label="Resend code"
-              variant="ghost"
+              label="Instant Demo Access (Skip Code)"
+              variant="outline"
               size="lg"
               fullWidth
-              loading={resending}
-              onPress={onResend}
+              icon={<Sparkles size={16} color={colors.primaryDark} />}
+              onPress={() => enterApp()}
             />
           </View>
         </ScrollView>

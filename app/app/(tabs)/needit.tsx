@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -8,53 +8,46 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { MotiView } from "moti";
-import { Flame, Trash2, Users } from "lucide-react-native";
+import {
+  ChevronRight,
+  Flame,
+  Sparkles,
+  Trash2,
+  Users,
+} from "lucide-react-native";
 
 import { Badge } from "@/components/Badge";
 import { Button } from "@/components/Button";
 import { CategoryChip } from "@/components/CategoryChip";
 import { EmptyState } from "@/components/EmptyState";
 import { LISTING_CATEGORIES } from "@/components/CategoryPicker";
+import { db } from "@/lib/database";
 import { colors, gradients, shadows } from "@/lib/theme";
 import {
   useNeedItStore,
   type NeedRequest,
   type NeedUrgency,
 } from "@/stores/needItStore";
+import type { ListingWithImages } from "@/types";
 
-/**
- * "Need It" request board (design §4.2 `(tabs)` route group — 4th tab). Lets a
- * student post what they're looking for so their campus can help.
- *
- * This screen is FRONTEND-ONLY: requests are held in the LOCAL, device-only
- * `stores/needItStore` (AsyncStorage) and are never synced anywhere. It does
- * not touch the database, RLS, auth, or any backend service.
- *
- * // TODO(backend): sync requests server-side (a campus-scoped requests table +
- * // RLS) and support responses/matching so other students can reply.
- */
-
-/** Shared input styling from the design system (mirrors listing/create.tsx). */
 const INPUT_CLASS =
   "rounded-2xl border border-border bg-surface px-4 py-3.5 text-base font-jakarta text-ink";
 
-/** Selectable urgency levels for the compose card (single-select). */
 const URGENCY_OPTIONS: { value: NeedUrgency; label: string }[] = [
   { value: "low", label: "Low" },
   { value: "normal", label: "Normal" },
   { value: "urgent", label: "Urgent" },
 ];
 
-/** Human label for a stored category value (falls back to the raw value). */
 function categoryLabel(value: string | null): string | null {
   if (!value) return null;
   const match = LISTING_CATEGORIES.find((cat) => cat.value === value);
   return match?.label ?? value;
 }
 
-/** Short relative timestamp, e.g. "just now", "5m ago", "3d ago". */
 function relativeTime(timestamp: number): string {
   const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
   if (seconds < 60) return "just now";
@@ -68,20 +61,23 @@ function relativeTime(timestamp: number): string {
   return `${weeks}w ago`;
 }
 
-/** Presentational config for an urgency value (label + tint classes). */
 const URGENCY_META: Record<
   NeedUrgency,
   { label: string; container: string; text: string }
 > = {
-  // Low → muted/neutral slate tint.
   low: { label: "Low", container: "bg-borderLight", text: "text-muted" },
-  // Normal → violet accent.
-  normal: { label: "Normal", container: "bg-violet-bg", text: "text-violet-text" },
-  // Urgent → amber/danger accent (with a flame icon on the badge).
-  urgent: { label: "Urgent", container: "bg-amber-bg", text: "text-amber-text" },
+  normal: {
+    label: "Normal",
+    container: "bg-violet-bg",
+    text: "text-violet-text",
+  },
+  urgent: {
+    label: "Urgent",
+    container: "bg-amber-bg",
+    text: "text-amber-text",
+  },
 };
 
-/** Small pill showing a request's urgency with its accent + optional icon. */
 function UrgencyBadge({ urgency }: { urgency: NeedUrgency }) {
   const meta = URGENCY_META[urgency];
   return (
@@ -100,10 +96,6 @@ function UrgencyBadge({ urgency }: { urgency: NeedUrgency }) {
   );
 }
 
-/**
- * A mock "Around campus" community request from another student. Purely
- * presentational sample data — NOT interactive and never synced to a backend.
- */
 type CommunityRequest = {
   id: string;
   initials: string;
@@ -113,7 +105,6 @@ type CommunityRequest = {
   timeAgo: string;
 };
 
-/** Sample community requests to make the board feel campus-driven. */
 const COMMUNITY_REQUESTS: CommunityRequest[] = [
   {
     id: "sample-1",
@@ -168,8 +159,6 @@ export default function NeedItScreen() {
       return;
     }
     const trimmedNote = note.trim();
-    // TODO(backend): POST the request to the campus-scoped requests API instead
-    // of the local store, and surface responses/matches.
     addRequest({
       title: trimmedTitle,
       category,
@@ -194,29 +183,29 @@ export default function NeedItScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Title + subtitle */}
-          <Text className="text-2xl font-jakartaExtrabold text-ink">Need It</Text>
+          {/* Title */}
+          <Text className="text-2xl font-jakartaExtrabold text-ink">
+            Need It
+          </Text>
           <Text className="mt-1 text-sm font-jakarta text-muted">
-            Post what you&apos;re looking for — your campus can help.
+            Post what you're looking for — your campus can help.
           </Text>
 
-          {/* Intro hero — deep-navy gradient banner. */}
-          <LinearGradient
-            colors={gradients.brandNavy as unknown as [string, string]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[shadows.card, { borderRadius: 20 }]}
-            className="mt-4 overflow-hidden rounded-card p-5"
+          {/* Hero Banner */}
+          <View
+            style={shadows.soft}
+            className="mt-5 rounded-2xl border border-borderLight bg-black p-4"
           >
-            <Text className="text-lg font-jakartaExtrabold text-white">
-              Can&apos;t find it on the feed?
+            <Text className=" font-jakartaExtrabold text-white">
+              Can't find it on the feed?
             </Text>
             <Text className="mt-1 text-sm font-jakarta text-white/85">
-              Tell everyone what you need and let a classmate come to you.
+              Tell everyone what you need and get auto-matched when a peer lists
+              it.
             </Text>
-          </LinearGradient>
+          </View>
 
-          {/* Compose section */}
+          {/* Compose Card */}
           <View
             style={shadows.soft}
             className="mt-5 rounded-2xl border border-borderLight bg-surface p-4"
@@ -242,13 +231,13 @@ export default function NeedItScreen() {
               </Text>
             ) : null}
 
-            {/* Optional note */}
+            {/* Note */}
             <Text className="mb-2 mt-4 text-sm font-jakartaSemibold text-ink">
               Add a note (optional)
             </Text>
             <TextInput
               className={`${INPUT_CLASS} min-h-[80px]`}
-              placeholder="Budget, condition, when you need it by…"
+              placeholder="Budget, condition, exam date deadline…"
               placeholderTextColor={colors.subtle}
               multiline
               textAlignVertical="top"
@@ -256,9 +245,9 @@ export default function NeedItScreen() {
               onChangeText={setNote}
             />
 
-            {/* Category tag — single-select, "Any" clears the tag. */}
+            {/* Category tag */}
             <Text className="mb-2 mt-4 text-sm font-jakartaSemibold text-ink">
-              Category (optional)
+              Category
             </Text>
             <ScrollView
               horizontal
@@ -280,7 +269,7 @@ export default function NeedItScreen() {
               ))}
             </ScrollView>
 
-            {/* Urgency — single-select pills, default "Normal". */}
+            {/* Urgency */}
             <Text className="mb-2 mt-4 text-sm font-jakartaSemibold text-ink">
               How urgent is it?
             </Text>
@@ -294,7 +283,6 @@ export default function NeedItScreen() {
                     onPress={() => setUrgency(option.value)}
                     accessibilityRole="button"
                     accessibilityState={{ selected }}
-                    accessibilityLabel={`Urgency: ${option.label}`}
                     className={`flex-row items-center rounded-full px-4 py-2 active:opacity-80 ${
                       selected
                         ? meta.container
@@ -329,30 +317,7 @@ export default function NeedItScreen() {
             </View>
           </View>
 
-          {/* Around campus — mock community requests (presentational sample). */}
-          <MotiView
-            from={{ opacity: 0, translateY: 10 }}
-            animate={{ opacity: 1, translateY: 0 }}
-            transition={{ type: "timing", duration: 420 }}
-          >
-            <View className="mb-1 mt-8 flex-row items-center">
-              <Users size={18} color={colors.ink} />
-              <Text className="ml-2 text-lg font-jakartaBold text-ink">
-                Around campus
-              </Text>
-            </View>
-            <Text className="mb-3 text-xs font-jakarta text-subtle">
-              Sample requests from your campus
-            </Text>
-
-            <View>
-              {COMMUNITY_REQUESTS.map((item) => (
-                <CommunityRequestCard key={item.id} request={item} />
-              ))}
-            </View>
-          </MotiView>
-
-          {/* Posted requests */}
+          {/* User's Posted requests with Auto-Match */}
           <Text className="mb-3 mt-8 text-lg font-jakartaBold text-ink">
             Your requests
           </Text>
@@ -375,25 +340,39 @@ export default function NeedItScreen() {
               ))}
             </View>
           )}
+
+          {/* Around campus */}
+          <MotiView
+            from={{ opacity: 0, translateY: 10 }}
+            animate={{ opacity: 1, translateY: 0 }}
+            transition={{ type: "timing", duration: 420 }}
+          >
+            <View className="mb-1 mt-8 flex-row items-center">
+              <Users size={18} color={colors.ink} />
+              <Text className="ml-2 text-lg font-jakartaBold text-ink">
+                Around campus
+              </Text>
+            </View>
+            <Text className="mb-3 text-xs font-jakarta text-subtle">
+              Sample requests from other students at your university
+            </Text>
+
+            <View>
+              {COMMUNITY_REQUESTS.map((item) => (
+                <CommunityRequestCard key={item.id} request={item} />
+              ))}
+            </View>
+          </MotiView>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
 }
 
-type CommunityRequestCardProps = {
-  request: CommunityRequest;
-};
-
-/**
- * A single mock community request rendered as a soft-surface card. Purely
- * presentational — a navy avatar chip with initials, the request title, a
- * category + urgency badge, and a relative time.
- */
-function CommunityRequestCard({ request }: CommunityRequestCardProps) {
+function CommunityRequestCard({ request }: { request: CommunityRequest }) {
   const label = useMemo(
     () => categoryLabel(request.category),
-    [request.category]
+    [request.category],
   );
 
   return (
@@ -401,7 +380,6 @@ function CommunityRequestCard({ request }: CommunityRequestCardProps) {
       style={shadows.soft}
       className="mb-3 flex-row items-start rounded-2xl bg-surface p-4"
     >
-      {/* Navy avatar chip with the student's initials. */}
       <View
         style={{ backgroundColor: colors.navy }}
         className="mr-3 h-10 w-10 items-center justify-center rounded-full"
@@ -429,26 +407,52 @@ function CommunityRequestCard({ request }: CommunityRequestCardProps) {
   );
 }
 
-type NeedRequestCardProps = {
+function NeedRequestCard({
+  request,
+  onDelete,
+}: {
   request: NeedRequest;
   onDelete: () => void;
-};
-
-/** A single posted request rendered as a soft-shadowed surface card. */
-function NeedRequestCard({ request, onDelete }: NeedRequestCardProps) {
+}) {
+  const router = useRouter();
   const label = useMemo(
     () => categoryLabel(request.category),
-    [request.category]
+    [request.category],
   );
-
-  // Defensive default: requests persisted before urgency existed lack the field.
   const urgency: NeedUrgency = request.urgency ?? "normal";
 
+  // Check for auto-matched listings in the marketplace
+  const [match, setMatch] = useState<ListingWithImages | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const all = await db.getListings();
+      const found = all.find((l) => {
+        if (l.status !== "active") return false;
+        // Category match or keyword match in title
+        if (
+          request.category &&
+          l.category.toLowerCase() === request.category.toLowerCase()
+        ) {
+          return true;
+        }
+        const keywords = request.title.toLowerCase().split(/\s+/);
+        return keywords.some(
+          (k) => k.length > 3 && l.title.toLowerCase().includes(k),
+        );
+      });
+      if (active && found) {
+        setMatch(found);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [request.category, request.title]);
+
   return (
-    <View
-      style={shadows.soft}
-      className="mb-3 rounded-2xl bg-surface p-4"
-    >
+    <View style={shadows.soft} className="mb-3 rounded-2xl bg-surface p-4">
       <View className="flex-row items-start">
         <View className="flex-1 pr-3">
           <Text className="text-base font-jakartaSemibold text-ink">
@@ -471,7 +475,6 @@ function NeedRequestCard({ request, onDelete }: NeedRequestCardProps) {
           </Text>
         </View>
 
-        {/* Delete — local remove only. */}
         <Pressable
           onPress={onDelete}
           accessibilityRole="button"
@@ -481,6 +484,38 @@ function NeedRequestCard({ request, onDelete }: NeedRequestCardProps) {
           <Trash2 size={16} color={colors.danger.text} />
         </Pressable>
       </View>
+
+      {/* Campus Match Notification Chip */}
+      {match && (
+        <Pressable
+          onPress={() => router.push(`/listing/${match.id}`)}
+          className="mt-3.5 flex-row items-center rounded-xl border border-green-200 bg-green-50 p-2.5 active:opacity-80"
+        >
+          <View className="h-6 w-6 items-center justify-center rounded-full bg-green-600">
+            <Sparkles size={13} color="#ffffff" />
+          </View>
+          <View className="ml-2 flex-1">
+            <Text
+              className="text-xs font-jakartaBold text-green-800"
+              numberOfLines={1}
+            >
+              Campus Match Available!
+            </Text>
+            <Text
+              className="text-[11px] font-jakarta text-green-700"
+              numberOfLines={1}
+            >
+              {match.title} • {match.price ? `₹${match.price}` : "Free"}
+            </Text>
+          </View>
+          <View className="flex-row items-center">
+            <Text className="text-xs font-jakartaBold text-primaryDark mr-0.5">
+              View
+            </Text>
+            <ChevronRight size={14} color={colors.primaryDark} />
+          </View>
+        </Pressable>
+      )}
     </View>
   );
 }

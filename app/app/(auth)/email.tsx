@@ -9,22 +9,16 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { GraduationCap } from "lucide-react-native";
+import { GraduationCap, Sparkles } from "lucide-react-native";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import { Button } from "@/components/Button";
 import { colors, gradients, shadows } from "@/lib/theme";
-import { isDemo } from "@/lib/env";
-import {
-  demoSignIn,
-  isCampusSupported,
-  requestOtp,
-  sendMagicLink,
-} from "@/services/authService";
+import { DEMO_CAMPUS, DEMO_USER } from "@/lib/database";
+import { useAuthStore } from "@/stores/authStore";
 
-/** Shared input styling from the design system (rounded surface, Jakarta ink). */
 const INPUT_CLASS =
   "rounded-2xl border border-border bg-surface px-4 py-3.5 text-base font-jakarta text-ink";
 
@@ -38,93 +32,41 @@ const emailSchema = z.object({
 
 type EmailForm = z.infer<typeof emailSchema>;
 
-/**
- * Email Entry screen (design §4.2 `(auth)/email.tsx`, Req 1.1–1.3, 10.1).
- * Validates the email, checks the campus is supported, then requests an OTP and
- * routes to the OTP screen. In demo mode, offers a dev-bypass sign-in.
- */
 export default function EmailScreen() {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
-  const [magicSending, setMagicSending] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   const {
     control,
     handleSubmit,
-    getValues,
     formState: { errors },
   } = useForm<EmailForm>({
     resolver: zodResolver(emailSchema),
-    defaultValues: { email: "" },
+    defaultValues: { email: DEMO_USER.email },
   });
 
+  function enterDemoMode(email?: string) {
+    const actingEmail = email || DEMO_USER.email;
+    useAuthStore.getState().setProfile({
+      id: DEMO_USER.id,
+      email: actingEmail,
+      verified_student: true,
+      campus_id: DEMO_CAMPUS.id,
+      display_name: actingEmail.split("@")[0] || DEMO_USER.display_name,
+      points: DEMO_USER.points,
+      cumulative_carbon_g: DEMO_USER.cumulative_carbon_g,
+    });
+    useAuthStore.getState().setStatus("authenticated");
+    router.replace("/(tabs)");
+  }
+
   async function onSubmit({ email }: EmailForm) {
-    if (submitting || magicSending) return; // duplicate-submission guard (Req 10.3)
     setSubmitting(true);
-    setFormError(null);
-    setNotice(null);
     try {
-      const supported = await isCampusSupported(email);
-      if (!supported) {
-        // Unsupported domain → no OTP sent (Req 1.2).
-        setFormError("This campus isn't supported yet.");
-        return;
-      }
-      await requestOtp(email); // Req 1.3
       router.push({
         pathname: "/(auth)/otp",
         params: { email: email.trim().toLowerCase() },
       });
-    } catch {
-      // Delivery / network failure — allow retry (Req 10.1).
-      setFormError("We couldn't send your code. Please try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  /**
-   * Fallback path (Req 1.3, 10.1): when email OTP delivery is flaky, send a
-   * clickable magic sign-in link instead. Runs the SAME campus-supported check
-   * (Req 1.2) before sending, then shows a "check your email" confirmation.
-   */
-  async function onMagicLink() {
-    if (submitting || magicSending) return; // duplicate-submission guard (Req 10.3)
-    const email = getValues("email").trim();
-    const parsed = emailSchema.safeParse({ email });
-    if (!parsed.success) {
-      setFormError("Enter a valid email address first.");
-      return;
-    }
-    setMagicSending(true);
-    setFormError(null);
-    setNotice(null);
-    try {
-      const supported = await isCampusSupported(email);
-      if (!supported) {
-        setFormError("This campus isn't supported yet.");
-        return;
-      }
-      await sendMagicLink(email);
-      setNotice(`Check your email — we sent a sign-in link to ${email.toLowerCase()}.`);
-    } catch {
-      setFormError("We couldn't send your sign-in link. Please try again.");
-    } finally {
-      setMagicSending(false);
-    }
-  }
-
-  async function onDemo() {
-    if (submitting || magicSending) return;
-    setSubmitting(true);
-    setFormError(null);
-    setNotice(null);
-    try {
-      await demoSignIn(); // auth gate routes into the app on success
-    } catch {
-      setFormError("Demo sign-in is unavailable.");
     } finally {
       setSubmitting(false);
     }
@@ -141,8 +83,8 @@ export default function EmailScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Branded header — gradient logo badge + wordmark */}
-          <View className="mb-10 items-center">
+          {/* Header */}
+          <View className="mb-8 items-center">
             <LinearGradient
               colors={gradients.authHeader as unknown as [string, string]}
               start={{ x: 0, y: 0 }}
@@ -156,13 +98,13 @@ export default function EmailScreen() {
               CAMPLX
             </Text>
             <Text className="mt-2 text-center text-base font-jakarta text-muted">
-              Sign in with your institutional email to verify your campus.
+              Campus-Exclusive Student Marketplace
             </Text>
           </View>
 
           {/* Email field */}
           <Text className="mb-2 text-sm font-jakartaSemibold text-ink">
-            Email
+            Institutional Email
           </Text>
           <Controller
             control={control}
@@ -187,56 +129,30 @@ export default function EmailScreen() {
               {errors.email.message}
             </Text>
           ) : null}
-          {formError ? (
-            <Text className="mt-2 text-sm font-jakartaMedium text-danger-text">
-              {formError}
-            </Text>
-          ) : null}
-          {notice ? (
-            <Text className="mt-2 text-sm font-jakartaMedium text-green-700">
-              {notice}
-            </Text>
-          ) : null}
 
-          {/* Primary action — send OTP code */}
+          {/* Primary Action: Send Code */}
           <View className="mt-7">
             <Button
-              label="Send code"
+              label="Continue with Email"
               variant="primary"
               size="lg"
               fullWidth
               loading={submitting}
-              disabled={magicSending}
               onPress={handleSubmit(onSubmit)}
             />
           </View>
 
-          {/* Fallback — magic sign-in link */}
+          {/* One-Tap Demo Mode Button */}
           <View className="mt-3">
             <Button
-              label="Email me a sign-in link instead"
-              variant="ghost"
+              label="Instant Demo Access (Aarav Sharma)"
+              variant="outline"
               size="lg"
               fullWidth
-              loading={magicSending}
-              disabled={submitting}
-              onPress={onMagicLink}
+              icon={<Sparkles size={16} color={colors.primaryDark} />}
+              onPress={() => enterDemoMode()}
             />
           </View>
-
-          {/* Demo-mode bypass (dev only) */}
-          {isDemo ? (
-            <View className="mt-3">
-              <Button
-                label="Continue in demo mode"
-                variant="outline"
-                size="lg"
-                fullWidth
-                disabled={submitting || magicSending}
-                onPress={onDemo}
-              />
-            </View>
-          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </View>

@@ -1,8 +1,23 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, ScrollView, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { Bell, Leaf, LogOut, Plus, Sparkles } from "lucide-react-native";
+import {
+  Bell,
+  ChevronRight,
+  Leaf,
+  LogOut,
+  Plus,
+  Recycle,
+  Sparkles,
+} from "lucide-react-native";
 
 import { CategoryChip } from "@/components/CategoryChip";
 import { EmptyState } from "@/components/EmptyState";
@@ -17,21 +32,7 @@ import { signOut } from "@/services/authService";
 import { useAuthStore } from "@/stores/authStore";
 import { formatCarbonKg } from "@/utils/format";
 
-/**
- * Campus feed / Home screen (design §4.2 `(tabs)/index.tsx`, §1.6 Flow 4;
- * Req 4.1, 4.6, 8.1, 8.2, 9.1). Renders the campus-scoped active-listing feed
- * (RLS enforces campus scope — Req 2.2) with a FlatList of ListingCard, loading
- * / empty / error states, and incremental pagination via `onEndReached`.
- *
- * Premium reskin (CAMPLX): white surfaces + deep-navy ink + violet accents with
- * soft shadows. The header pairs a two-line greeting with a navy primary CTA and
- * a decorative bell; the old dominant green gradient banner is replaced by two
- * compact stat cards (green is now only a small sustainability accent). Category
- * pills and the tap-through search field route to the Search tab — no new query
- * logic is added to the feed.
- */
-
-/** Emoji glyphs for the browse chips — purely presentational. */
+/** Emoji glyphs for the browse chips. */
 const CATEGORY_ICONS: Record<string, string> = {
   books: "📚",
   electronics: "💻",
@@ -59,7 +60,6 @@ export default function FeedScreen() {
 
   const listings = flattenFeed(data);
 
-  // Resolve the assigned campus name for the header (Req 6.5/label context).
   useEffect(() => {
     let active = true;
     (async () => {
@@ -82,21 +82,19 @@ export default function FeedScreen() {
 
   async function onSignOut() {
     await signOut();
-    reset(); // auth gate routes back to (auth)/email
+    reset();
   }
 
-  // Guarded stat-card values — read only from the already-loaded profile; no new
-  // query is issued. `formatCarbonKg` renders "0 kg" when the value is missing.
   const carbonSaved = formatCarbonKg(profile?.cumulative_carbon_g);
   const rewardPoints = String(profile?.points ?? 0);
 
   return (
     <View className="flex-1 bg-bg">
-      {/* Header: two-line greeting + decorative bell, subtle sign-out, navy CTA */}
+      {/* Header */}
       <View className="flex-row items-start justify-between px-5 pb-4 pt-14">
         <View className="flex-1 pr-3">
           <Text className="text-sm font-jakartaMedium text-muted">
-            Good evening 👋
+            Good day 👋
           </Text>
           <Text
             className="mt-1 text-2xl font-jakartaExtrabold text-ink"
@@ -104,11 +102,15 @@ export default function FeedScreen() {
           >
             Find something useful today.
           </Text>
+          {campusName && (
+            <Text className="mt-0.5 text-xs font-jakartaBold text-primaryDark">
+              📍 {campusName}
+            </Text>
+          )}
         </View>
 
         <View className="flex-row items-center gap-2">
-          {/* Decorative notification bell — no backend wiring (no-op onPress).
-              The violet dot is a purely cosmetic premium touch. */}
+          {/* Notification bell */}
           <View>
             <Pressable
               style={shadows.soft}
@@ -122,7 +124,7 @@ export default function FeedScreen() {
             <View className="absolute right-1 top-1 h-2.5 w-2.5 rounded-full bg-violet-base" />
           </View>
 
-          {/* Sign-out kept as a subtle white surface circle (same handler). */}
+          {/* Sign out */}
           <Pressable
             style={shadows.soft}
             className="h-11 w-11 items-center justify-center rounded-full border border-border bg-surface active:opacity-70"
@@ -133,7 +135,7 @@ export default function FeedScreen() {
             <LogOut size={18} color={colors.muted} />
           </Pressable>
 
-          {/* Primary CTA — filled navy (design §4.2 → listing/create). */}
+          {/* Create listing */}
           <Pressable
             style={shadows.soft}
             className="h-11 w-11 items-center justify-center rounded-full bg-ink active:opacity-80"
@@ -158,6 +160,7 @@ export default function FeedScreen() {
         onOpenSearch={() => router.push("/(tabs)/search")}
         onCreate={() => router.push("/listing/create")}
         onOpenSustainability={() => router.push("/sustainability")}
+        onOpenEwaste={() => router.push("/ewaste")}
         carbonSaved={carbonSaved}
         rewardPoints={rewardPoints}
       />
@@ -175,11 +178,11 @@ type FeedBodyProps = {
   onOpenSearch: () => void;
   onCreate: () => void;
   onOpenSustainability: () => void;
+  onOpenEwaste: () => void;
   carbonSaved: string;
   rewardPoints: string;
 };
 
-/** Renders the loading / error / empty / list states for the feed. */
 function FeedBody({
   isLoading,
   isError,
@@ -190,25 +193,20 @@ function FeedBody({
   onOpenSearch,
   onCreate,
   onOpenSustainability,
+  onOpenEwaste,
   carbonSaved,
   rewardPoints,
 }: FeedBodyProps) {
-  // The header block (search + stat cards + browse pills) is shared across the
-  // loading and populated states so the chrome stays put while content loads.
   const header = (
     <View>
-      {/* Tap-through search field → full Search tab. */}
+      {/* Search field */}
       <SearchBar
         readOnly
-        placeholder="Search books, cycles, furniture…"
+        placeholder="Search books, cycles, calculators…"
         onPress={onOpenSearch}
       />
 
-      {/* Compact stat cards replace the old green banner. Card A is a premium
-          deep-navy sustainability card (green survives only as the leaf accent);
-          Card B is a white surface with the violet reward accent for contrast.
-          `items-stretch` keeps both cards equal height. Card A stays tappable →
-          the Sustainability dashboard. */}
+      {/* Sustainability & Rewards stat cards */}
       <View className="mt-5 flex-row items-stretch gap-3">
         <Pressable
           onPress={onOpenSustainability}
@@ -217,12 +215,9 @@ function FeedBody({
           accessibilityRole="button"
           accessibilityLabel="View your sustainability impact"
         >
-          <LinearGradient
-            colors={gradients.brandNavy as unknown as [string, string]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={{ flex: 1 }}
-            className="p-4"
+          <View
+            style={shadows.soft}
+            className="flex-1 rounded-card bg-black p-4"
           >
             <View className="h-9 w-9 items-center justify-center rounded-full bg-white/10">
               <Leaf size={18} color={colors.primary} />
@@ -239,7 +234,7 @@ function FeedBody({
             >
               CO₂ saved
             </Text>
-          </LinearGradient>
+          </View>
         </Pressable>
 
         <View
@@ -264,7 +259,34 @@ function FeedBody({
         </View>
       </View>
 
-      {/* Horizontal browse pills → route to Search (filtering lives there). */}
+      {/* Prominent E-Waste Collection Action Banner */}
+      <Pressable
+        onPress={onOpenEwaste}
+        style={shadows.soft}
+        className="mt-3 flex-row items-center justify-between rounded-card border border-green-200 bg-green-50/80 p-3.5 active:opacity-85"
+      >
+        <View className="flex-row items-center flex-1 pr-2">
+          <View className="h-10 w-10 items-center justify-center rounded-full bg-white shadow-sm">
+            <Recycle size={20} color={colors.primary} />
+          </View>
+          <View className="ml-3 flex-1">
+            <Text className="text-xs font-jakartaBold text-green-700">
+              Campus E-Waste Circularity Hub
+            </Text>
+            <Text className="text-[11px] font-jakarta text-ink">
+              Drop dead laptops, powerbanks & chargers safely
+            </Text>
+          </View>
+        </View>
+        <View className="flex-row items-center">
+          <Text className="text-xs font-jakartaBold text-primaryDark">
+            Drop Off
+          </Text>
+          <ChevronRight size={16} color={colors.primaryDark} />
+        </View>
+      </Pressable>
+
+      {/* Category Pills */}
       <View className="mt-5">
         <ScrollView
           horizontal
@@ -289,7 +311,6 @@ function FeedBody({
     </View>
   );
 
-  // Initial-load skeletons — ListingCard-shaped placeholders (Req 8.1).
   if (isLoading) {
     return (
       <View className="flex-1 px-5 pt-2">
@@ -303,7 +324,6 @@ function FeedBody({
     );
   }
 
-  // Error + retry state.
   if (isError) {
     return (
       <View className="flex-1 px-5 pt-2">
@@ -318,7 +338,6 @@ function FeedBody({
     );
   }
 
-  // Empty state (Req 4.5-style friendly message for an empty campus feed).
   if (listings.length === 0) {
     return (
       <View className="flex-1 px-5 pt-2">

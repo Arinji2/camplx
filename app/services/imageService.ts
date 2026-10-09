@@ -9,6 +9,46 @@ export type PickedImage = {
   height?: number;
 };
 
+/**
+ * Capture an item photo directly using the device camera.
+ */
+export async function takePhoto(): Promise<PickedImage | null> {
+  try {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      alert(
+        "Camera permission is required to capture product photos for inspection.",
+      );
+      return null;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ["images"],
+      quality: 0.85,
+      allowsEditing: false,
+    });
+
+    if (result.canceled || !result.assets || result.assets.length === 0) {
+      return null;
+    }
+
+    const a = result.assets[0];
+    return {
+      uri: a.uri,
+      mimeType: a.mimeType || "image/jpeg",
+      fileSize: a.fileSize,
+      width: a.width,
+      height: a.height,
+    };
+  } catch (err) {
+    console.warn("[imageService] takePhoto error:", err);
+    return null;
+  }
+}
+
+/**
+ * Pick images from the media library as secondary option.
+ */
 export async function pickImages(
   options: { multiple?: boolean } = {},
 ): Promise<PickedImage[]> {
@@ -19,13 +59,13 @@ export async function pickImages(
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       allowsMultipleSelection: options.multiple ?? true,
-      quality: 0.8,
+      quality: 0.85,
     });
     if (result.canceled) return [];
 
     return result.assets.map((a) => ({
       uri: a.uri,
-      mimeType: a.mimeType,
+      mimeType: a.mimeType || "image/jpeg",
       fileSize: a.fileSize,
       width: a.width,
       height: a.height,
@@ -58,6 +98,5 @@ export async function uploadListingImage(
   _listingId: string,
   asset: PickedImage,
 ): Promise<string> {
-  // In our local SQLite mode, the local URI is preserved directly
   return asset.uri;
 }

@@ -9,14 +9,29 @@ import type {
   ActiveReservation,
 } from "@/types";
 
-export type InspectionFinding = {
+export type DefectItem = {
   id: string;
-  label: string;
-  severity: "minor" | "moderate" | "major";
-  confidence: "high" | "medium" | "low";
-  reviewStatus: "verified" | "disputed" | "pending";
-  description: string;
-  location?: { x: number; y: number; width: number; height: number }; // normalized 0-100
+  defect_type: string;
+  severity: string;
+  box_2d: [number, number, number, number]; // [ymin, xmin, ymax, xmax] 0-1000
+  buyer_note: string;
+};
+
+export type PricingIntelligence = {
+  estimated_retail_new: number;
+  typical_used_market_price: number;
+  condition_penalty_amount: number;
+  recommended_min_price: number;
+  recommended_listing_price: number;
+  recommended_max_price: number;
+  pricing_rationale: string;
+};
+
+export type AmazonStyleListing = {
+  title: string;
+  key_features_bullets: string[];
+  technical_specifications: Record<string, string>;
+  seller_condition_summary: string;
 };
 
 export type InspectionResult = {
@@ -24,43 +39,40 @@ export type InspectionResult = {
   listingId: string;
   status: "completed" | "pending" | "failed";
   originalImageUri: string;
-  annotatedImageUri?: string;
-  findings: InspectionFinding[];
+  annotatedImageBase64?: string;
+  overall_condition: string;
+  circular_lifecycle_category: "Reusable" | "Repairable" | "End-of-life";
+  defects: DefectItem[];
+  pricing?: PricingIntelligence;
+  amazon_listing?: AmazonStyleListing;
   modelNotes: string[];
   createdAt: string;
 };
 
 export type EwasteRequest = {
   id: string;
-  userId: string;
-  deviceType: string;
+  student_id: string;
+  item_category: string;
   description: string;
   quantity: number;
+  latitude: number;
+  longitude: number;
   location: string;
   preferredSlot: string;
   notes?: string;
-  status: "submitted" | "scheduled" | "collected" | "recycled";
+  status: "pending" | "scheduled" | "collected" | "handed_over";
+  zone_cluster_id?: number | null;
+  pickup_sequence_order?: number | null;
   createdAt: string;
   estimatedCarbonSavingsKg: number;
 };
 
-export type LocalNeedItRequest = {
-  id: string;
-  title: string;
-  category: string | null;
-  description?: string;
-  budget?: number;
-  status: "open" | "fulfilled";
-  createdAt: number;
-};
-
 const STORAGE_KEYS = {
-  LISTINGS: "camplx.db.listings.v1",
-  RESERVATIONS: "camplx.db.reservations.v1",
-  EWASTE: "camplx.db.ewaste.v1",
-  INSPECTIONS: "camplx.db.inspections.v1",
-  NEEDIT: "camplx.db.needit.v1",
-  INITIALIZED: "camplx.db.initialized.v1",
+  LISTINGS: "camplx.db.listings.v2",
+  RESERVATIONS: "camplx.db.reservations.v2",
+  EWASTE: "camplx.db.ewaste.v2",
+  INSPECTIONS: "camplx.db.inspections.v2",
+  INITIALIZED: "camplx.db.initialized.v2",
 };
 
 export const DEMO_CAMPUS = {
@@ -76,11 +88,10 @@ export const DEMO_USER = {
   verified_student: true,
   campus_id: DEMO_CAMPUS.id,
   campus_name: DEMO_CAMPUS.name,
-  points: 380,
-  cumulative_carbon_g: 24500,
+  points: 420,
+  cumulative_carbon_g: 32500,
 };
 
-// Seed listings with high-quality, stable image representations
 const SEED_LISTINGS: ListingWithImages[] = [
   {
     id: "list-1",
@@ -89,7 +100,7 @@ const SEED_LISTINGS: ListingWithImages[] = [
     listing_type: "sell",
     title: "Casio FX-991EX ClassWiz Scientific Calculator",
     description:
-      "Original Casio FX-991EX with solar battery. Perfect for Engineering Mathematics & Physics. High resolution LCD display, pristine keys.",
+      "Original Casio FX-991EX ClassWiz with dual solar & battery power. High-resolution natural textbook LCD display. Clean keys and protective snap-on case.",
     category: "electronics",
     condition: "Like New",
     price: 950,
@@ -112,9 +123,9 @@ const SEED_LISTINGS: ListingWithImages[] = [
     seller_id: DEMO_USER.id,
     campus_id: DEMO_CAMPUS.id,
     listing_type: "sell",
-    title: "Firefox Target 29T Mountain Bicycle",
+    title: "Firefox Target 29T Mountain Commuter Cycle",
     description:
-      "Sturdy 21-speed MTB with front suspension and dual disc brakes. Recently serviced with new brake pads and bell. Great for commuting between hostel and department.",
+      "Sturdy 21-speed alloy MTB with front suspension fork and dual mechanical disc brakes. Serviced with new chain lubricant and bell. Great for commuting between hostel and tech block.",
     category: "cycles",
     condition: "Good",
     price: 4800,
@@ -137,9 +148,9 @@ const SEED_LISTINGS: ListingWithImages[] = [
     seller_id: "seller-102",
     campus_id: DEMO_CAMPUS.id,
     listing_type: "sell",
-    title: "Higher Engineering Mathematics – B.S. Grewal (44th Edition)",
+    title: "Higher Engineering Mathematics – B.S. Grewal (44th Ed)",
     description:
-      "Standard textbook for 1st & 2nd year engineering mathematics. Clean pages, no highlighting, hardbound edition with syllabus markings.",
+      "Standard textbook for university engineering mathematics. Clean pages, no pencil marks or tears, firmly bound edition.",
     category: "books",
     condition: "Good",
     price: 420,
@@ -162,9 +173,9 @@ const SEED_LISTINGS: ListingWithImages[] = [
     seller_id: "seller-103",
     campus_id: DEMO_CAMPUS.id,
     listing_type: "donate",
-    title: "Adjustable LED Study Lamp + Extension Board",
+    title: "Hostel Study Lamp + 4-Socket Power Spike Guard",
     description:
-      "3-color temperature desk lamp with flexible neck plus a 4-socket spike guard. Free for any junior moving into Hostel Block C.",
+      "Flexible neck LED lamp with 3 color temperatures, paired with an Anchor spike guard. Free handover to incoming hostel junior.",
     category: "hostel_essentials",
     condition: "Good",
     price: null,
@@ -182,109 +193,8 @@ const SEED_LISTINGS: ListingWithImages[] = [
       },
     ],
   },
-  {
-    id: "list-5",
-    seller_id: "seller-104",
-    campus_id: DEMO_CAMPUS.id,
-    listing_type: "sell",
-    title: "Logitech K380 Bluetooth Multi-Device Keyboard",
-    description:
-      "Compact wireless keyboard connecting up to 3 devices (laptop, tablet, phone). Fresh AAA batteries included. Perfect for coding and taking lecture notes.",
-    category: "electronics",
-    condition: "Like New",
-    price: 1400,
-    status: "active",
-    carbon_savings_g: 4500,
-    published_at: new Date(Date.now() - 3600000 * 24).toISOString(),
-    created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
-    listing_images: [
-      {
-        id: "img-5",
-        listing_id: "list-5",
-        storage_path:
-          "https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=800&q=80",
-        display_order: 0,
-      },
-    ],
-  },
-  {
-    id: "list-6",
-    seller_id: "seller-105",
-    campus_id: DEMO_CAMPUS.id,
-    listing_type: "sell",
-    title: "Wooden Study Desk with 2 Storage Drawers",
-    description:
-      "Engineered wood desk with smooth laminate finish. Sturdy steel legs, fits easily into hostel dorm space. Disassembles for easy transport.",
-    category: "furniture",
-    condition: "Fair",
-    price: 1800,
-    status: "active",
-    carbon_savings_g: 32000,
-    published_at: new Date(Date.now() - 3600000 * 30).toISOString(),
-    created_at: new Date(Date.now() - 3600000 * 30).toISOString(),
-    listing_images: [
-      {
-        id: "img-6",
-        listing_id: "list-6",
-        storage_path:
-          "https://images.unsplash.com/photo-1518455027359-f3f8164ba6bd?w=800&q=80",
-        display_order: 0,
-      },
-    ],
-  },
-  {
-    id: "list-7",
-    seller_id: "seller-106",
-    campus_id: DEMO_CAMPUS.id,
-    listing_type: "sell",
-    title: "Sony WH-CH520 Wireless Bluetooth Headphones",
-    description:
-      "50-hour battery life with multipoint connection. Clear audio for online lectures and quiet study sessions. Minor ear-cup wear, sounds like brand new.",
-    category: "electronics",
-    condition: "Good",
-    price: 2100,
-    status: "active",
-    carbon_savings_g: 8000,
-    published_at: new Date(Date.now() - 3600000 * 48).toISOString(),
-    created_at: new Date(Date.now() - 3600000 * 48).toISOString(),
-    listing_images: [
-      {
-        id: "img-7",
-        listing_id: "list-7",
-        storage_path:
-          "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800&q=80",
-        display_order: 0,
-      },
-    ],
-  },
-  {
-    id: "list-8",
-    seller_id: "seller-107",
-    campus_id: DEMO_CAMPUS.id,
-    listing_type: "donate",
-    title: "Dorm Essentials Pack (Iron Box + Hangers + Laundry Bag)",
-    description:
-      "Philips dry iron in working condition with 12 clothes hangers and a foldable mesh laundry basket. Graduating senior giveaway.",
-    category: "hostel_essentials",
-    condition: "Fair",
-    price: null,
-    status: "active",
-    carbon_savings_g: 6500,
-    published_at: new Date(Date.now() - 3600000 * 60).toISOString(),
-    created_at: new Date(Date.now() - 3600000 * 60).toISOString(),
-    listing_images: [
-      {
-        id: "img-8",
-        listing_id: "list-8",
-        storage_path:
-          "https://images.unsplash.com/photo-1582735689369-4fe89db7114c?w=800&q=80",
-        display_order: 0,
-      },
-    ],
-  },
 ];
 
-// Seed inspection for list-1 (Calculator) and list-2 (Cycle)
 const SEED_INSPECTIONS: InspectionResult[] = [
   {
     id: "insp-1",
@@ -292,31 +202,57 @@ const SEED_INSPECTIONS: InspectionResult[] = [
     status: "completed",
     originalImageUri:
       "https://images.unsplash.com/photo-1594980596870-8aa52a78d8cd?w=800&q=80",
-    findings: [
+    overall_condition: "Like New",
+    circular_lifecycle_category: "Reusable",
+    defects: [
       {
-        id: "f-1",
-        label: "Minor outer bevel scuff",
-        severity: "minor",
-        confidence: "high",
-        reviewStatus: "verified",
-        description:
-          "Small visual friction mark on top edge plastic casing. Display screen is 100% intact.",
-        location: { x: 18, y: 12, width: 22, height: 14 },
+        id: "def-1",
+        defect_type: "Bezel Scuff",
+        severity: "Cosmetic Minor",
+        box_2d: [120, 160, 260, 420],
+        buyer_note:
+          "Light surface scuff on outer border plastic. Glass display untouched.",
       },
       {
-        id: "f-2",
-        label: "Solar panel clarity check",
-        severity: "minor",
-        confidence: "high",
-        reviewStatus: "verified",
-        description:
-          "Photovoltaic cell surface is clean with no micro-cracks or delamination.",
-        location: { x: 62, y: 15, width: 25, height: 16 },
+        id: "def-2",
+        defect_type: "Solar Strip Check",
+        severity: "Cosmetic Minor",
+        box_2d: [130, 620, 290, 890],
+        buyer_note:
+          "Photovoltaic cell array is intact and generating nominal voltage.",
       },
     ],
+    pricing: {
+      estimated_retail_new: 1495,
+      typical_used_market_price: 1050,
+      condition_penalty_amount: 100,
+      recommended_min_price: 850,
+      recommended_listing_price: 950,
+      recommended_max_price: 1100,
+      pricing_rationale:
+        "High semester exam demand on campus; 36% discount off current bookstore retail.",
+    },
+    amazon_listing: {
+      title:
+        "Casio FX-991EX ClassWiz Scientific Calculator (552 Functions, Solar)",
+      key_features_bullets: [
+        "Advanced high-resolution natural textbook display with QR Code visualization.",
+        "Equipped with 552 scientific functions including matrix, vector, and calculus.",
+        "Solar cell plus backup battery for reliable power during mid-terms and finals.",
+        "Protective hard case included with clean non-sticky keypad response.",
+      ],
+      technical_specifications: {
+        Brand: "Casio",
+        Model: "FX-991EX ClassWiz",
+        Display: "Natural Textbook LCD",
+        "Power Source": "Solar & LR44 Battery",
+      },
+      seller_condition_summary:
+        "Light cosmetic wear on casing edge. Screen and electronic circuits are pristine.",
+    },
     modelNotes: [
-      "Visual surface inspection completed via Gemini multimodal analysis.",
-      "Internal battery lifespan and LCD segment circuit require physical verification.",
+      "Multimodal analysis completed via Gemini vision pipeline.",
+      "Identified as Tier-1 circular reuse asset.",
     ],
     createdAt: new Date().toISOString(),
   },
@@ -326,32 +262,45 @@ const SEED_INSPECTIONS: InspectionResult[] = [
     status: "completed",
     originalImageUri:
       "https://images.unsplash.com/photo-1485965120184-e220f721d03e?w=800&q=80",
-    findings: [
+    overall_condition: "Good",
+    circular_lifecycle_category: "Reusable",
+    defects: [
       {
-        id: "f-3",
-        label: "Chainstay paint rub",
-        severity: "minor",
-        confidence: "medium",
-        reviewStatus: "verified",
-        description:
-          "Superficial chain slap marks near rear derailleur bracket. Frame tubing is structurally sound.",
-        location: { x: 68, y: 64, width: 20, height: 18 },
-      },
-      {
-        id: "f-4",
-        label: "Brake cable housing wear",
-        severity: "moderate",
-        confidence: "medium",
-        reviewStatus: "pending",
-        description:
-          "Outer rubber sheath on front brake line shows light weathering. Steel cable core intact.",
-        location: { x: 42, y: 28, width: 16, height: 20 },
+        id: "def-3",
+        defect_type: "Chainstay Paint Rub",
+        severity: "Cosmetic Minor",
+        box_2d: [620, 640, 800, 860],
+        buyer_note: "Normal friction scratch near rear axle from chain slap.",
       },
     ],
-    modelNotes: [
-      "Tire tread depth and rim alignment verified visually.",
-      "Buyer advised to test gear shifts during in-person pickup.",
-    ],
+    pricing: {
+      estimated_retail_new: 12500,
+      typical_used_market_price: 5200,
+      condition_penalty_amount: 400,
+      recommended_min_price: 4400,
+      recommended_listing_price: 4800,
+      recommended_max_price: 5400,
+      pricing_rationale:
+        "High utility commuter bike for campus terrain; priced 60% below showroom cost.",
+    },
+    amazon_listing: {
+      title: "Firefox Target 29T All-Terrain Commuter MTB (Dual Disc)",
+      key_features_bullets: [
+        "29-inch high-traction nylon tires designed for smooth campus road transit.",
+        "Mechanical front & rear disc brakes for responsive stopping in all conditions.",
+        "Front suspension fork dampening curb bumps and gravel paths.",
+        "Serviced gear shifters and chain ready for immediate daily riding.",
+      ],
+      technical_specifications: {
+        Brand: "Firefox",
+        Type: "Mountain Bike (MTB)",
+        "Wheel Size": "29 Inches",
+        Brakes: "Dual Mechanical Disc",
+      },
+      seller_condition_summary:
+        "Mechanically sound with minor cosmetic chainstay rubs.",
+    },
+    modelNotes: ["Bicycle tires and brake lever integrity visually validated."],
     createdAt: new Date().toISOString(),
   },
 ];
@@ -359,35 +308,57 @@ const SEED_INSPECTIONS: InspectionResult[] = [
 const SEED_EWASTE: EwasteRequest[] = [
   {
     id: "ewaste-1",
-    userId: DEMO_USER.id,
-    deviceType: "Dead Dell Laptop (Motherboard issue)",
-    description:
-      "2018 Inspiron with cracked casing and fried motherboard. Battery has been safely disconnected.",
+    student_id: DEMO_USER.id,
+    item_category: "End-of-life",
+    description: "Dell Inspiron with dead motherboard & bulging battery",
     quantity: 1,
-    location: "Campus Collection Hub, Tech Block B",
-    preferredSlot: "Wednesday 3:00 PM - 5:00 PM",
-    notes: "Non-repairable, certified e-waste recovery requested.",
+    latitude: 18.6251,
+    longitude: 73.8198,
+    location: "Tech Block B, DPU Campus",
+    preferredSlot: "Morning (10:00 AM - 1:00 PM)",
+    notes: "Non-repairable PCB; battery isolated safely.",
     status: "scheduled",
+    zone_cluster_id: 0,
+    pickup_sequence_order: 1,
     createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
     estimatedCarbonSavingsKg: 34.5,
   },
   {
     id: "ewaste-2",
-    userId: "seller-102",
-    deviceType: "Swollen Lithium-ion Power Bank & Cables",
-    description:
-      "3 old USB-C charging bricks + 1 old 10,000mAh power bank showing slight bulging.",
+    student_id: "seller-102",
+    item_category: "End-of-life",
+    description: "Swollen Lithium-ion Power Bank & 3 Frayed USB Cables",
     quantity: 4,
-    location: "Hostel Block 4 Drop Box",
-    preferredSlot: "Friday 10:00 AM - 1:00 PM",
-    notes: "Marked for hazardous battery recycling.",
-    status: "collected",
-    createdAt: new Date(Date.now() - 86400000 * 4).toISOString(),
+    latitude: 18.6272,
+    longitude: 73.8184,
+    location: "Hostel Block 4 Reception",
+    preferredSlot: "Afternoon (2:00 PM - 5:00 PM)",
+    notes: "Flagged for hazardous recycling protocol.",
+    status: "pending",
+    zone_cluster_id: null,
+    pickup_sequence_order: null,
+    createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
     estimatedCarbonSavingsKg: 8.2,
+  },
+  {
+    id: "ewaste-3",
+    student_id: "seller-105",
+    item_category: "Repairable",
+    description: "HP Laser DeskJet with faulty paper roller motor",
+    quantity: 1,
+    latitude: 18.6242,
+    longitude: 73.8211,
+    location: "Library Ground Floor Hub",
+    preferredSlot: "Morning (10:00 AM - 1:00 PM)",
+    notes: "Eligible for department electronics workshop refurbishment.",
+    status: "pending",
+    zone_cluster_id: null,
+    pickup_sequence_order: null,
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+    estimatedCarbonSavingsKg: 18.0,
   },
 ];
 
-// Helper to load and save
 async function getTable<T>(key: string, defaultData: T[]): Promise<T[]> {
   try {
     const raw = await AsyncStorage.getItem(key);
@@ -416,17 +387,12 @@ export const db = {
         await setTable(STORAGE_KEYS.EWASTE, SEED_EWASTE);
         await setTable(STORAGE_KEYS.RESERVATIONS, []);
         await AsyncStorage.setItem(STORAGE_KEYS.INITIALIZED, "true");
-        if (__DEV__)
-          console.log(
-            "[Database] Local SQLite-equivalent storage initialized with demo seed.",
-          );
       }
     } catch (e) {
       console.warn("[Database] Init warning:", e);
     }
   },
 
-  // Listings
   async getListings(): Promise<ListingWithImages[]> {
     await db.init();
     return getTable<ListingWithImages>(STORAGE_KEYS.LISTINGS, SEED_LISTINGS);
@@ -468,7 +434,6 @@ export const db = {
     await setTable(STORAGE_KEYS.LISTINGS, filtered);
   },
 
-  // Reservations
   async getReservations(): Promise<any[]> {
     return getTable(STORAGE_KEYS.RESERVATIONS, []);
   },
@@ -563,7 +528,6 @@ export const db = {
     });
   },
 
-  // E-waste
   async getEwasteRequests(): Promise<EwasteRequest[]> {
     await db.init();
     return getTable<EwasteRequest>(STORAGE_KEYS.EWASTE, SEED_EWASTE);
@@ -572,19 +536,26 @@ export const db = {
   async createEwasteRequest(
     item: Omit<
       EwasteRequest,
-      "id" | "createdAt" | "status" | "estimatedCarbonSavingsKg"
+      | "id"
+      | "createdAt"
+      | "status"
+      | "estimatedCarbonSavingsKg"
+      | "zone_cluster_id"
+      | "pickup_sequence_order"
     >,
   ): Promise<EwasteRequest> {
     const all = await db.getEwasteRequests();
     const newReq: EwasteRequest = {
       ...item,
       id: `ewaste-${Date.now()}`,
-      status: "submitted",
+      status: "pending",
+      zone_cluster_id: null,
+      pickup_sequence_order: null,
       createdAt: new Date().toISOString(),
       estimatedCarbonSavingsKg: Number(
         (
           item.quantity *
-          (item.deviceType.toLowerCase().includes("laptop") ? 25 : 4.5)
+          (item.description.toLowerCase().includes("laptop") ? 34.5 : 5.0)
         ).toFixed(1),
       ),
     };
@@ -603,7 +574,12 @@ export const db = {
     await setTable(STORAGE_KEYS.EWASTE, updated);
   },
 
-  // Inspections
+  async saveOptimizedEwasteRoutes(
+    clusteredRequests: EwasteRequest[],
+  ): Promise<void> {
+    await setTable(STORAGE_KEYS.EWASTE, clusteredRequests);
+  },
+
   async getInspectionByListingId(
     listingId: string,
   ): Promise<InspectionResult | null> {
@@ -629,18 +605,5 @@ export const db = {
     } else {
       await setTable(STORAGE_KEYS.INSPECTIONS, [inspection, ...all]);
     }
-  },
-
-  async updateFindingStatus(
-    listingId: string,
-    findingId: string,
-    newStatus: InspectionFinding["reviewStatus"],
-  ): Promise<void> {
-    const inspection = await db.getInspectionByListingId(listingId);
-    if (!inspection) return;
-    const updatedFindings = inspection.findings.map((f) =>
-      f.id === findingId ? { ...f, reviewStatus: newStatus } : f,
-    );
-    await db.saveInspection({ ...inspection, findings: updatedFindings });
   },
 };
